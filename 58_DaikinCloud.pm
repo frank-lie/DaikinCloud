@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.0.3 - 07.04.2023 shorten error logs (remove repeated message-content)
 # v1.0.2 - 06.04.2023 fix feedback error on incorrect set commands
 # v1.0.1 - 24.03.2023 separate the attributes for master/indoor units devices
 # v1.0.0 - 22.03.2023 finale release
@@ -29,7 +30,7 @@ use HttpUtils;
 use Blocking;
 
 my $OPENID_CLIENT_ID = "7rk39602f0ds8lk0h076vvijnb";
-my $DaikinCloud_version = "v1.0.2 - 06.04.2023";
+my $DaikinCloud_version = "v1.0.3 - 07.04.2023";
 
 sub DaikinCloud_Initialize($)
 {
@@ -356,7 +357,7 @@ sub DaikinCloud_SetCmdResponse($)
 	my $hash = $param->{hash};
 	
 	if ($err ne "") {
-		Log3 $hash, 1, "DaikinCloud (SetCmd): error while requesting ".$param->{url}." - $err";
+		Log3 $hash, 1, "DaikinCloud (SetCmd): $err";
 		
 	} elsif ($param->{code} == 401 ) {
 		readingsSingleUpdate($hash, 'status_setcmd', 'refreshing token ...', 1 );
@@ -679,7 +680,7 @@ sub DaikinCloud_BlockUpdate($)
 	              url => "https://api.prod.unicloud.edc.dknadmin.be/v1/gateway-devices" };
 	## do the request
 	my ($err,$response) = HttpUtils_BlockingGet($param);
-	return $name."|error (3) while requesting ".$param->{url}." - $err" if($err ne "");
+	return $name."|error (3) $err" if($err ne "");
 	return $name."|error (3) need refresh access-token! http-statuscode: 401" if ($param->{code} == 401 );
 	return $name."|error (3) HTTP-Status-Code: ".$param->{code} if (($param->{code} != 200) || ($response eq ""));
 
@@ -963,7 +964,7 @@ sub DaikinCloud_BlockAuth($)
 	$param = { url => $url, timeout => 5, method => "GET", ignoreredirects => 1};
 	($err,$response) = HttpUtils_BlockingGet($param);		
 	
-	return $name."|error (2) while requesting: ".$param->{url}." - $err" if($err ne "");
+	return $name."|error (2) $err" if($err ne "");
 	return $name."|error (2) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 302 );
 	### get crsf cookies
 	my $cookies = (join "; ", ($param->{httpheader} =~ m/((?:xsrf-token|csrf-state|csrf-state-legacy)=[^;]+)/ig))."; ";
@@ -975,7 +976,7 @@ sub DaikinCloud_BlockAuth($)
 	$param = { url => $url, timeout => 5, method => "GET", ignoreredirects => 1 };
 	($err,$response) = HttpUtils_BlockingGet($param);
 	
-	return $name."|error (5) while requesting ".$param->{url}." - $err" if($err ne "");
+	return $name."|error (5) $err" if($err ne "");
 	return $name."|error (5) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 302 );
 	### searching for samlContext
 	my ($samlContext) = ( $param->{httpheader} =~ m/samlContext=([^&]+)/i );
@@ -985,7 +986,7 @@ sub DaikinCloud_BlockAuth($)
 	$param = { url => $url, timeout => 5, method => "GET" };
 	($err,$response) = HttpUtils_BlockingGet($param);
 		
-	return $name."|error (7) while requesting ".$param->{url}." - $err" if($err ne "" || $response eq "");
+	return $name."|error (7) $err" if($err ne "" || $response eq "");
 	return $name."|error (7) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
 	### searching for Api-Version
 	my ($version) = ($response =~ m/(\d+-\d-\d+)/ );
@@ -995,7 +996,7 @@ sub DaikinCloud_BlockAuth($)
 	$param = { url => $url, timeout => 5, method => "GET" };
 	($err,$response) = HttpUtils_BlockingGet($param);
 	
-	return $name."|error (9) while requesting ".$param->{url}." - $err" if($err ne "");
+	return $name."|error (9) $err" if($err ne "");
 	return $name."|error (9) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
 	### extrakt single-sign-on cookies
 	my $ssocookies = (join "; ", ($param->{httpheader} =~ m/((?:gmid|ucid|hasGmid)=[^;]+)/ig))."; ";
@@ -1020,7 +1021,7 @@ sub DaikinCloud_BlockAuth($)
 	$param = { url => $url, timeout => 5, method => "POST", header => $header, data => $body };
 	($err,$response) = HttpUtils_BlockingGet($param);
 	
-	return $name."|error (11) while requesting ".$param->{url}." - $err" if($err ne "");
+	return $name."|error (11) $err" if($err ne "");
 	return $name."|error (11) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
 	### extract login-token
 	my ($logintoken) = ($response =~ m/"login_token": "([^"]+)/i ); 
@@ -1038,7 +1039,7 @@ sub DaikinCloud_BlockAuth($)
 	$param = { url => $url, timeout => 5, method => "POST", header => $header, data => $body};
 	($err,$response) = HttpUtils_BlockingGet($param);
 	
-	return $name."|error (13) while requesting ".$param->{url}." - $err" if($err ne "");
+	return $name."|error (13) $err" if($err ne "");
 	return $name."|error (13) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
 	### extract samlResponse and relayState
 	my ($samlResponse) = ($response =~ m/name="SAMLResponse" value="([^"]+)/i );
@@ -1052,7 +1053,7 @@ sub DaikinCloud_BlockAuth($)
 	$param = { url => $url, timeout => 5, method => "POST", header => $header, data => $body, ignoreredirects => 1 };
 	($err,$response) = HttpUtils_BlockingGet($param);
 	
-	return $name."|error (16) while requesting ".$param->{url}." - $err" if($err ne "");
+	return $name."|error (16) $err" if($err ne "");
 	return $name."|error (16) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 302 );
 	### extract authorization code
 	my ($code) = ($param->{httpheader} =~ m/daikinunified:\/\/login\?code=([^;]+)/i ); 
@@ -1064,7 +1065,7 @@ sub DaikinCloud_BlockAuth($)
 	$param =  { url => $url, header => $header, timeout => 5, method => "POST" };
 	($err,$response) = HttpUtils_BlockingGet($param);
 
-	return $name."|error (18) while requesting ".$param->{url}." - $err" if($err ne "");
+	return $name."|error (18) $err" if($err ne "");
 	return $name."|error (18) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
 	## extract tokenset quick and dirty
 	my ($a_token)  = ( $response =~ m/"access.?token"\s*:\s*"([^"]+)/i );
@@ -1160,7 +1161,7 @@ sub DaikinCloud_BlockRefresh($)
 	my $data = toJSON($body);
     my $param = { url => $url, timeout => 5, data => $data, method => "POST", header => $header };    
 	my ($err,$response) = HttpUtils_BlockingGet($param);
-	return $name."|error (4) while requesting ".$param->{url}." - $err" if($err ne "");
+	return $name."|error (4) $err" if($err ne "");
 	return $name."|error (5) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
 	## extract tokenset quick and dirty
 	my ($a_token)  = ( $response =~ m/"access.?token"\s*:\s*"([^"]+)/i );
