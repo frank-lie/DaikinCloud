@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.0.4 - 07.04.2023 check isCloudConnectionUp before sent commands
 # v1.0.3 - 07.04.2023 shorten error logs (remove repeated message-content)
 # v1.0.2 - 06.04.2023 fix feedback error on incorrect set commands
 # v1.0.1 - 24.03.2023 separate the attributes for master/indoor units devices
@@ -30,7 +31,7 @@ use HttpUtils;
 use Blocking;
 
 my $OPENID_CLIENT_ID = "7rk39602f0ds8lk0h076vvijnb";
-my $DaikinCloud_version = "v1.0.3 - 07.04.2023";
+my $DaikinCloud_version = "v1.0.4 - 07.04.2023";
 
 sub DaikinCloud_Initialize($)
 {
@@ -243,6 +244,8 @@ sub DaikinCloud_Set($$$$)
 		(undef,$setlist) = DaikinCloud_setlist($hash);		
 	} else {
 		my $err = ""; 
+		## check if device connected
+		return "Cannot sent $cmd for $name to Daikin-Cloud, because unit is offline!" if (ReadingsVal($name, 'isCloudConnectionUp', "true" ) ne "true");
 		($err,$setlist) = DaikinCloud_setlist($hash);
 		return $err if ($err ne "");
 		my $mode = ReadingsVal($name, 'operationMode', "0");
