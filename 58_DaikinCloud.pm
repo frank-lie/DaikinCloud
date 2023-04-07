@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.0.2 - 06.04.2023 fix feedback error on incorrect set commands
 # v1.0.1 - 24.03.2023 separate the attributes for master/indoor units devices
 # v1.0.0 - 22.03.2023 finale release
 # v0.4.0 - 18.03.2023 validationcheck for set commands
@@ -28,7 +29,7 @@ use HttpUtils;
 use Blocking;
 
 my $OPENID_CLIENT_ID = "7rk39602f0ds8lk0h076vvijnb";
-my $DaikinCloud_version = "v1.0.1 - 24.03.2023";
+my $DaikinCloud_version = "v1.0.2 - 06.04.2023";
 
 sub DaikinCloud_Initialize($)
 {
@@ -242,10 +243,11 @@ sub DaikinCloud_Set($$$$)
 	} else {
 		my $err = ""; 
 		($err,$setlist) = DaikinCloud_setlist($hash);
+		return $err if ($err ne "");
 		my $mode = ReadingsVal($name, 'operationMode', "0");
 		return "No visible operationMode for this device! Please forceUpdate first! " if ($mode eq "0");
 		if ($cmd =~ /setpoint|demandControl|fanMode|horizontal|vertical|econoMode|streamerMode|onOffMode|powerfulMode/i) {
-			DaikinCloud_CheckAndQueue($hash,$cmd,$value,$mode);
+			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$mode); #fix v1.0.2
 		## if fanLevel is set, the fanMode must be set to fixed	
 		} elsif ($cmd eq 'fanLevel' ) {
 			$err .= DaikinCloud_CheckAndQueue($hash,"fanMode","fixed",$mode);
@@ -291,6 +293,8 @@ sub DaikinCloud_Set($$$$)
 			$err .= DaikinCloud_CheckAndQueue($hash,"fanMode",ReadingsVal($name,"fanMode","auto"),$value);
 			$err .= DaikinCloud_CheckAndQueue($hash,"fanLevel",ReadingsVal($name,"fanLevel","1"),$value);
 			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$value);
+		} else {
+			$err .= "unknown argument $cmd, choose one of $setlist"; #fix v1.0.2
 		}
 		## all cmd & value are already in queue -> not send the cmd to the cloud
 		$err .= DaikinCloud_SetCmd();
