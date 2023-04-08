@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.1.0 - 08.04.2023 integrate kWh calculation, add state-reading, add short-commands for on|off
 # v1.0.4 - 07.04.2023 check isCloudConnectionUp before sent commands
 # v1.0.3 - 07.04.2023 shorten error logs (remove repeated message-content)
 # v1.0.2 - 06.04.2023 fix feedback error on incorrect set commands
@@ -27,11 +28,12 @@ use strict;
 use warnings;
 
 use Time::HiRes qw(gettimeofday time);
+use Scalar::Util qw(looks_like_number);
 use HttpUtils;
 use Blocking;
 
 my $OPENID_CLIENT_ID = "7rk39602f0ds8lk0h076vvijnb";
-my $DaikinCloud_version = "v1.0.4 - 07.04.2023";
+my $DaikinCloud_version = "v1.1.0 - 08.04.2023";
 
 sub DaikinCloud_Initialize($)
 {
@@ -67,7 +69,6 @@ sub DaikinCloud_Define($$)
 		setDevAttrList($name, "consumptionData:1,0 ". $readingFnAttributes);
 		if ($init_done) {
 			CommandAttr(undef, "-silent ".$name.' devStateIcon on:Ventilator_wind@green off:Ventilator_fett@black');
-			CommandAttr(undef, "-silent ".$name.' stateFormat onOffMode');
 			CommandAttr(undef, "-silent ".$name.' event-on-change-reading .*');
 			CommandAttr(undef, "-silent ".$name.' room DaikinCloud_Devices');
 			CommandAttr(undef, "-silent ".$name.' webCmd onOffMode:setpoint:operationMode:swing:fanSpeed');
@@ -84,6 +85,7 @@ sub DaikinCloud_Define($$)
 		if ($init_done) {
 			CommandAttr(undef, "-silent ".$name.' autocreate 1');
 			CommandAttr(undef, "-silent ".$name.' interval 60');
+			CommandAttr(undef, "-silent ".$name.' consumptionData 1');
 			CommandAttr(undef, "-silent ".$name.' room DaikinCloud_Devices');				
 		}
 	}
@@ -244,7 +246,7 @@ sub DaikinCloud_Set($$$$)
 		(undef,$setlist) = DaikinCloud_setlist($hash);		
 	} else {
 		my $err = ""; 
-		## check if device connected
+		## check if device connected #fix v1.0.4
 		return "Cannot sent $cmd for $name to Daikin-Cloud, because unit is offline!" if (ReadingsVal($name, 'isCloudConnectionUp', "true" ) ne "true");
 		($err,$setlist) = DaikinCloud_setlist($hash);
 		return $err if ($err ne "");
@@ -252,6 +254,9 @@ sub DaikinCloud_Set($$$$)
 		return "No visible operationMode for this device! Please forceUpdate first! " if ($mode eq "0");
 		if ($cmd =~ /setpoint|demandControl|fanMode|horizontal|vertical|econoMode|streamerMode|onOffMode|powerfulMode/i) {
 			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$mode); #fix v1.0.2
+		## quick command on|off for onOffMode #fix v1.1.0
+		} elsif ($cmd eq 'on' || $cmd eq 'off' ) {
+			$err .= DaikinCloud_CheckAndQueue($hash,'onOffMode',$cmd,$mode);
 		## if fanLevel is set, the fanMode must be set to fixed	
 		} elsif ($cmd eq 'fanLevel' ) {
 			$err .= DaikinCloud_CheckAndQueue($hash,"fanMode","fixed",$mode);
@@ -520,7 +525,8 @@ sub DaikinCloud_Attr($$)
 		## delete all energy_ readings if consumptionData in IOMASTER is deleted or "0"
 		} elsif ( $attrName eq 'consumptionData' ) {
 			if (( $cmd eq "del" ) || ( $attrVal == 0 )) {
-				CommandDeleteReading(undef,"-q TYPE=DaikinCloud ^energy_.*");				
+				CommandDeleteReading(undef,"-q TYPE=DaikinCloud ^energy_.*");
+				CommandDeleteReading(undef,"-q TYPE=DaikinCloud ^kWh_.*");				
 			}	
 		} 
 	## handle the change of indoor units attributes
@@ -786,6 +792,26 @@ sub DaikinCloud_BlockUpdate($)
 		my $dev_name = $modules{DaikinCloud}{defptr}{$key}->{NAME};
 		$eopt = AttrVal($dev_name,"consumptionData",0) if (defined($dev_name));		
 		if (ref($devicedata{$key}) eq "HASH"){
+			##fix v1.1.0 calculate kWh year
+			my ($kWh_h_y, $kWh_h_d, $kWh_h_w, $kWh_c_y, $kWh_c_d, $kWh_c_w) = (0,0,0,0,0,0); 
+			for (my $i=13; $i<25; $i++) {
+				$kWh_h_y += $devicedata{$key}{'energy_heating_m_'.$i} if (defined($devicedata{$key}{'energy_heating_m_'.$i}) && looks_like_number($devicedata{$key}{'energy_heating_m_'.$i}));
+				$kWh_h_d += $devicedata{$key}{'energy_heating_d_'.$i} if (defined($devicedata{$key}{'energy_heating_d_'.$i}) && looks_like_number($devicedata{$key}{'energy_heating_d_'.$i}));
+				$kWh_c_y += $devicedata{$key}{'energy_cooling_m_'.$i} if (defined($devicedata{$key}{'energy_cooling_m_'.$i}) && looks_like_number($devicedata{$key}{'energy_cooling_m_'.$i}));
+				$kWh_c_d += $devicedata{$key}{'energy_cooling_d_'.$i} if (defined($devicedata{$key}{'energy_cooling_d_'.$i}) && looks_like_number($devicedata{$key}{'energy_cooling_d_'.$i}));
+			}
+			for (my $i=8; $i<16; $i++) {
+				$kWh_h_w += $devicedata{$key}{'energy_heating_w_'.$i} if (defined($devicedata{$key}{'energy_heating_w_'.$i}) && looks_like_number($devicedata{$key}{'energy_heating_w_'.$i}));
+				$kWh_c_w += $devicedata{$key}{'energy_cooling_w_'.$i} if (defined($devicedata{$key}{'energy_cooling_w_'.$i}) && looks_like_number($devicedata{$key}{'energy_cooling_w_'.$i}));
+			}			
+			$devicedata{$key}{kWh_heating_year} = $kWh_h_y;
+			$devicedata{$key}{kWh_heating_day}  = $kWh_h_d;
+			$devicedata{$key}{kWh_heating_week} = $kWh_h_w;
+			$devicedata{$key}{kWh_cooling_year} = $kWh_c_y;
+			$devicedata{$key}{kWh_cooling_day}  = $kWh_c_d;
+			$devicedata{$key}{kWh_cooling_week} = $kWh_c_w;
+			##endfix v1.1.0 
+			
 			foreach my $subkey (sort keys %{$devicedata{$key}}) {
 				## search for all operation-mode-keys
 				if ($subkey =~ m/_value_operationModes_/i) {
@@ -842,7 +868,9 @@ sub DaikinCloud_BlockUpdate($)
 			} else { 
 				$devicedata{$key}{fanSpeed} = $devicedata{$key}{fanMode};
 			}			
-		}		
+		}
+		##fix v1.1.0 add state-reading
+		$devicedata{$key}{state} = $devicedata{$key}{onOffMode} if (defined($devicedata{$key}{onOffMode}));
 	}
 	## prepare for telnet callback
 	my $ret = $name;
@@ -1201,12 +1229,12 @@ sub DaikinCloud_BlockRefresh($)
       <br>
       First a master device has to be defined to handle the access to the 
       cloud:<br>
-	  <br>
+      <br>
       <code>define &lt;name&gt; DaikinCloud</code><br>
       <br>
       After creating the master device it is required to store username and
       password und get the tokenset:<br>
-	  <br>
+      <br>
       <code>set &lt;name&gt; username &lt;your-email&gt;</code><br>
       <code>set &lt;name&gt; password &lt;your-password&gt;</code><br>
       <code>get &lt;name&gt; tokenSet</code><br>
@@ -1222,7 +1250,7 @@ sub DaikinCloud_BlockRefresh($)
   <ul>
     <ul>
       <br>
-  	  <a id="DaikinCloud-set-username"></a>
+      <a id="DaikinCloud-set-username"></a>
       <li><b>username</b><br>
         The username which is required to sign on the Daikin cloud. It is  
         highly recommend to use a emailadress. Social-media-logins are not
@@ -1294,7 +1322,7 @@ sub DaikinCloud_BlockRefresh($)
       <li><b>setpoint</b> [ 18 .. 30 ]<br>
         Set the setpoint temperature. It is an absolute temperature in the allowed 
         range. The range is determined by the operationMode and the indoor unit 
-		(resolution 0.5 degrees).
+        (resolution 0.5 degrees).
       </li>
       <a id="DaikinCloud-set-swing"></a>
       <li><b>swing</b> [ stop | horizontal | vertical | 3dswing | windNice ]<br>
@@ -1310,7 +1338,7 @@ sub DaikinCloud_BlockRefresh($)
   <b>Get</b> 
   <ul>
     <ul>
-	  <br>
+      <br>
       <a id="DaikinCloud-get-tokenSet"></a>
       <li><b>tokenSet</b><br>
          Get the tokenSet (access-token, refresh-token) to communicate with
@@ -1338,18 +1366,18 @@ sub DaikinCloud_BlockRefresh($)
   <b>Attributes</b> (only for the master device)<br>
   <ul>
     <ul>
-	  <br>
-  	  <a id="DaikinCloud-attr-autocreate"></a>
+      <br>
+      <a id="DaikinCloud-attr-autocreate"></a>
       <li><b>autocreate</b> [ 1 | 0 ]<br>
         If set to 1 (default) new devices will be created automatically upon 
-	    receiving data from cloud. Set this value to 0 to disable autocreating.
-	    <br>
+        receiving data from cloud. Set this value to 0 to disable autocreating.
+        <br>
       </li>
       <a id="DaikinCloud-attr-interval"></a>
       <li><b>interval</b> [ 15 .. &infin; ]<br>
         Defines the interval in seconds for requesting actual data from the cloud. 
-	    The minimum possible interval is 15 seconds so that the daikin cloud is 
-	    not overloaded. Default is 60 seconds.<br>
+        The minimum possible interval is 15 seconds so that the daikin cloud is 
+        not overloaded. Default is 60 seconds.<br>
       </li>
     </ul>
   </ul>
@@ -1357,15 +1385,21 @@ sub DaikinCloud_BlockRefresh($)
   <b>Attributes</b> (for the master device and the indoor units)<br>
   <ul>
     <ul>
-	  <br>
-  	  <a id="DaikinCloud-attr-consumptionData"></a>
+      <br>
+      <a id="DaikinCloud-attr-consumptionData"></a>
       <li><b>consumptionData</b> [ 0 | 1 ]<br>
-        Master device: If set to 1 the transmitted data will also evaluate 
-        consumption data. Set this attribute only if needed. Otherwise delete
-        the attribute or set to 0 to save resources.<br>
-        Indoor unit: If set to 1 the evaluated consumption data will be stored 
-        in the readings of this device. Note that this requires to set the 
-        attribut consumptionData to 1 in the master device.
+        <i>Master device:</i> If set to 1 the transmitted data will also evaluate 
+        consumption data. The read out consumption data is stored as total
+        values in the readings kWh_[heating|cooling]_[day|week|year].
+        <br><br>
+        <i>Indoor unit:</i> If set to 1 additional the raw data of the energy 
+        readings are saved in this device. Note that this requires to set the  
+        attribut consumptionData to 1 in the master device. The raw data is saved 
+        in the readings energy_[heating|cooling]_[d|w|m]_[1..24]. The d-readings
+        refer to 2-hour time slices from yesterday [d_1..d_12] and today 
+        [d_13..d_24]. The w-readings refer to whole days [Mon..Sun] of the last 
+        week [w_1..w_7] and current week [w_8..w_14]. The m-readings refer to whole
+        months [Jan..Dez] in the last year [m_1..m_12] and current year [m_13..m_24].
       </li>
     </ul>
   </ul>
@@ -1390,12 +1424,12 @@ sub DaikinCloud_BlockRefresh($)
       <br>
       Zuerst muss ein Master-Ger&auml;t (bzw. eine Bridge) definiert werden, 
       welches den Zugriff auf die Cloud erm&ouml;glicht:<br>
-	  <br>
+      <br>
       <code>define &lt;name&gt; DaikinCloud</code><br>
       <br>
       Nach dem Erstellen des Master-Ger&auml;ts m&uuml;ssen Benutzername und 
       Passwort gespeichert werden. Danach kann das TokenSet abgerufen werden:<br>
-	  <br>
+      <br>
       <code>set &lt;name&gt; username &lt;your-email&gt;</code><br>
       <code>set &lt;name&gt; password &lt;your-password&gt;</code><br>
       <code>get &lt;name&gt; tokenSet</code><br>
@@ -1412,7 +1446,7 @@ sub DaikinCloud_BlockRefresh($)
   <ul>
     <ul>
       <br>
-  	  <a id="DaikinCloud-set-username"></a>
+      <a id="DaikinCloud-set-username"></a>
       <li><b>username</b><br>
         Der Benutzername, der zum Anmelden in der Daikin-Cloud verwendet wird 
         (email-Adresse). Social-Media-Logins werden ggf. nicht 
@@ -1492,8 +1526,8 @@ sub DaikinCloud_BlockRefresh($)
       <a id="DaikinCloud-set-setpoint"></a>
       <li><b>setpoint</b> [ 18 .. 30 ]<br>
         Setzt die Zieltemperatur des Innenger&auml;tes im erlaubten Bereich. 
-		Der erlaubte Bereich ist abh&auml;ngig vom Operation-Modus und von der
-		Art des Innenger&auml;tes (Aufl&oumlsung 0.5 Grad).
+        Der erlaubte Bereich ist abh&auml;ngig vom Operation-Modus und von der
+        Art des Innenger&auml;tes (Aufl&oumlsung 0.5 Grad).
       </li>
       <a id="DaikinCloud-set-swing"></a>
       <li><b>swing</b> [ stop | horizontal | vertical | 3dswing | windNice ]<br>
@@ -1511,7 +1545,7 @@ sub DaikinCloud_BlockRefresh($)
   <b>Get</b> 
   <ul>
     <ul>
-	  <br>
+      <br>
       <a id="DaikinCloud-get-tokenSet"></a>
       <li><b>tokenSet</b><br>
         Abrufen eines TokenSets (access-token, refresh-token), um Zugang zur
@@ -1541,22 +1575,22 @@ sub DaikinCloud_BlockRefresh($)
   <b>Attributes</b> (nur f&uuml;r das Master-Device)<br>
   <ul>
     <ul>
-	  <br>
-  	  <a id="DaikinCloud-attr-autocreate"></a>
+      <br>
+      <a id="DaikinCloud-attr-autocreate"></a>
       <li><b>autocreate</b> [ 1 | 0 ]<br>
         Bei Einstellung auf 1 (Standard) werden neue Devices automatisch 
-	    erstellt, wenn entsprechende Daten aus der Cloud empfangen werden. 
-	    Setzen Sie diesen Wert auf 0 oder l&ouml;schen ihn, um die 
-	    automatische Erstellung von Devices zu deaktivieren. 
-	    <br>
+        erstellt, wenn entsprechende Daten aus der Cloud empfangen werden. 
+        Setzen Sie diesen Wert auf 0 oder l&ouml;schen ihn, um die 
+        automatische Erstellung von Devices zu deaktivieren. 
+        <br>
       </li>
       <a id="DaikinCloud-attr-interval"></a>
       <li><b>interval</b> [ 15 .. &infin; ]<br>
         Definiert das Intervall in Sekunden, innerhalb dessen die aktuellen 
-	    Daten aus der Cloud jeweils abgefragt werden sollen. Das Minimum 
-	    betr&auml;gt 15 Sekunden, damit die Daikin Cloud nicht zu stark 
-	    belastet wird. Standard sind 60 Sekunden. Dieses Attribut ist nur 
-	    im Master-Device verf&uuml;gbar.<br>
+        Daten aus der Cloud jeweils abgefragt werden sollen. Das Minimum 
+        betr&auml;gt 15 Sekunden, damit die Daikin Cloud nicht zu stark 
+        belastet wird. Standard sind 60 Sekunden. Dieses Attribut ist nur 
+        im Master-Device verf&uuml;gbar.<br>
       </li>
     </ul>
   </ul>
@@ -1564,17 +1598,23 @@ sub DaikinCloud_BlockRefresh($)
   <b>Attributes</b> (f&uuml;r Master-Device und Innenger&auml;te)<br>
   <ul>
     <ul>
-	  <br>
-  	  <a id="DaikinCloud-attr-consumptionData"></a>
+      <br>
+      <a id="DaikinCloud-attr-consumptionData"></a>
       <li><b>consumptionData</b> [ 0 | 1 ]<br>
-        Master-Device: Wenn auf 1 gesetzt, werden ebenfalls die in der 
-       Cloud gespeicherten Verbrauchsdaten ausgelesen. Legen Sie dieses 
-       Attribut nur bei Bedarf an. Setzen Sie es auf 0 oder l&ouml;schen es, 
-       um Ressourcen zu sparen.<br>
-       Innenger&auml;t: Wenn auf 1 gesetzt, werden die abgerufenen 
-       Verbrauchsdaten in den Readings des Innenger&auml;tes gespeichert. 
-	   Dies setzt voraus, dass im Master-Device das Attribut consumptionData 
-	   auf 1 gesetzt worden ist.
+        <i>Master-Device:</i> Wenn auf 1 gesetzt, werden die in der Cloud 
+        gespeicherten Verbrauchsdaten ausgelesen und als Summenwerte
+        in den Readings kWh_[heating|cooling]_[day|week|year] gespeichert.
+        <br><br>
+        <i>Innenger&auml;t:</i> Wenn auf 1 gesetzt, werden zus&auml;tzlich 
+        die Rohdaten der energy-readings aus der Cloud f&uuml;r dieses Device   
+        gespeichert. Dies setzt voraus, dass im Master-Device das Attribut   
+        consumptionData auf 1 gesetzt worden ist. Die Rohdaten werden in 
+        den Readings energy_[heating|cooling]_[d|w|m]_[1..24] gespeichert. 
+        Die d-Readings beziehen sich auf 2-Stunden-Zeitscheiben von gestern 
+        [d_1..d_12] und heute [d_13..d_24]. Die w-Readings beziehen sich auf  
+        ganze Tage [Mo..So] der letzten Woche [w_1..w_7] und aktuellen Woche 
+        [w_8..w_14]. Die m-Readings beziehen sich auf ganze Monate [Jan..Dez]
+        im letzten Jahr [m_1..m_12] und aktuellen Jahr [m_13..m_24].
       </li>
     </ul>
   </ul>
