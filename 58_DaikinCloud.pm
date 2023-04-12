@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.2.0 - 12.04.2023 implement rawDataRequest, settables only as climateControl
 # v1.1.0 - 08.04.2023 integrate kWh calculation, add state-reading, add short-commands for on|off
 # v1.0.4 - 07.04.2023 check isCloudConnectionUp before sent commands
 # v1.0.3 - 07.04.2023 shorten error logs (remove repeated message-content)
@@ -33,7 +34,7 @@ use HttpUtils;
 use Blocking;
 
 my $OPENID_CLIENT_ID = "7rk39602f0ds8lk0h076vvijnb";
-my $DaikinCloud_version = "v1.1.0 - 08.04.2023";
+my $DaikinCloud_version = "v1.2.0 - 12.04.2023";
 
 sub DaikinCloud_Initialize($)
 {
@@ -293,14 +294,15 @@ sub DaikinCloud_Set($$$$)
 			$err .= DaikinCloud_CheckAndQueue($hash,"demandControl","fixed",$mode);
 			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$mode);
 		## if operationMode ist changed, setpoint, fanLevel, fanMode and possible fanDirections has to be set
+		## fix v1.2.0 only report error when changing operationMode, not for additionally set-commands
 		} elsif ($cmd eq 'operationMode'){
 			if (($value ne "dry") && ($value ne "fanOnly")){
-				$err .= DaikinCloud_CheckAndQueue($hash,"setpoint",ReadingsVal($name,"setpoint","22"),$value);
+				DaikinCloud_CheckAndQueue($hash,"setpoint",ReadingsVal($name,"setpoint","22"),$value);
 			}
-			$err .= DaikinCloud_CheckAndQueue($hash,"horizontal",ReadingsVal($name,"horizontal","stop"),$value) if ($setlist =~ m/horizontal/i );
-			$err .= DaikinCloud_CheckAndQueue($hash,"vertical",ReadingsVal($name,"vertical","stop"),$value) if ($setlist =~ m/vertical/i );
-			$err .= DaikinCloud_CheckAndQueue($hash,"fanMode",ReadingsVal($name,"fanMode","auto"),$value);
-			$err .= DaikinCloud_CheckAndQueue($hash,"fanLevel",ReadingsVal($name,"fanLevel","1"),$value);
+			DaikinCloud_CheckAndQueue($hash,"horizontal",ReadingsVal($name,"horizontal","stop"),$value) if ($setlist =~ m/horizontal/i );
+			DaikinCloud_CheckAndQueue($hash,"vertical",ReadingsVal($name,"vertical","stop"),$value) if ($setlist =~ m/vertical/i );
+			DaikinCloud_CheckAndQueue($hash,"fanMode",ReadingsVal($name,"fanMode","auto"),$value) if ($setlist =~ m/fanMode/i );
+			DaikinCloud_CheckAndQueue($hash,"fanLevel",ReadingsVal($name,"fanLevel","1"),$value) if ($setlist =~ m/fanLevel/i );
 			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$value);
 		} else {
 			$err .= "unknown argument $cmd, choose one of $setlist"; #fix v1.0.2
@@ -475,9 +477,14 @@ sub DaikinCloud_Get($$@)
 			return "Please first get the tokenSet!" if ( !defined($a_token) );
 			DaikinCloud_UpdateRequest($hash);
 			return "Going to update device data.";
-			
+		## fix v1.2.0 implement get rawData	
+		} elsif ( lc($cmd) eq 'rawdata') {
+			my $a_token = $hash->{helper}{ACCESS_TOKEN} ;
+			return "Please first get the tokenSet!" if ( !defined($a_token) );
+			return DaikinCloud_RequestRawData($hash);
+						
 		} else {
-			$setlist="forceUpdate:noArg tokenSet:noArg refreshToken:noArg";
+			$setlist="forceUpdate:noArg tokenSet:noArg refreshToken:noArg rawData:noArg";
 		}
 	## get for indoor units
     } elsif ( lc($cmd) eq 'forceupdate') {
@@ -537,6 +544,33 @@ sub DaikinCloud_Attr($$)
 	}			
 	return undef;  
 }
+
+sub DaikinCloud_RequestRawData($)
+{
+	my $hash = $modules{DaikinCloud}{defptr}{IOMASTER};
+	return "DaikinCloud_RequestRawData: error (0) no IOMASTER device found!" if (!defined($hash));
+	my $a_token = $hash->{helper}{ACCESS_TOKEN};
+	if (!defined($a_token)) {
+		readingsSingleUpdate($hash, 'state', 'no access-token', 1 );
+		return "DaikinCloud_RequestRawData: error (1) no access_token found." 
+	};
+	## define the header of the request with Bearer and access_token
+	my $header = {
+		"user-agent" 	=> "Daikin/1.6.1.4681 CFNetwork/1209 Darwin/20.2.0",
+		"x-api-key"  	=> "xw6gvOtBHq5b1pyceadRp6rujSNSZdjx2AqT03iC",
+		"Authorization" => "Bearer ".$a_token,
+		"Content-Type"	=> "application/json",
+	};	
+	my $param = { timeout => 5, method => "GET", header => $header,
+	              url => "https://api.prod.unicloud.edc.dknadmin.be/v1/gateway-devices" };
+	## do the request
+	my ($err,$response) = HttpUtils_BlockingGet($param);
+	return "DaikinCloud_RequestRawData: error (2) $err" if($err ne "");
+	return "DaikinCloud_RequestRawData: error (2) need refresh access-token! http-statuscode: 401" if ($param->{code} == 401 );
+	return "DaikinCloud_RequestRawData: error (2) HTTP-Status-Code: ".$param->{code} if (($param->{code} != 200) || ($response eq ""));
+	return $response;	
+}
+
 
 #######################################################################################################  
 ##################################  UpdateRequest #####################################################
@@ -727,7 +761,8 @@ sub DaikinCloud_BlockUpdate($)
 			$devicedata{$dev_id{$nr}}{$dat} = $return_json->{$key}; 
 		} else {
 			## filter settable entrys
-			if ($key =~ m/_settable$/i ) {
+			## fix v1.2.0 only settable for climateControl
+			if (($key =~ m/_settable$/i ) && ($embeddedIds{$nr}{$mp} eq "climateControl")) {
 				if ($return_json->{$key} eq "true") {
 					my ($path) = ($key =~ m/^(.*)_settable$/i );
 					## save range und step to "$settables" if min, max and step ist available
