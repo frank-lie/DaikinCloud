@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.3.0 - 18.04.2023 implement multiple managementpoint support (for Altherma)
 # v1.2.0 - 12.04.2023 implement rawDataRequest, settables only as climateControl
 # v1.1.0 - 08.04.2023 integrate kWh calculation, add state-reading, add short-commands for on|off
 # v1.0.4 - 07.04.2023 check isCloudConnectionUp before sent commands
@@ -33,18 +34,18 @@ use Scalar::Util qw(looks_like_number);
 use HttpUtils;
 use Blocking;
 
-my $OPENID_CLIENT_ID = "7rk39602f0ds8lk0h076vvijnb";
-my $DaikinCloud_version = "v1.2.0 - 12.04.2023";
+my $OPENID_CLIENT_ID = '7rk39602f0ds8lk0h076vvijnb';
+my $DaikinCloud_version = 'v1.3.0 - 18.04.2023';
 
 sub DaikinCloud_Initialize($)
 {
 	my ($hash) = @_;
-	$hash->{DefFn}    = "DaikinCloud_Define";
-	$hash->{NotifyFn} = "DaikinCloud_Notify";
-	$hash->{UndefFn}  = "DaikinCloud_Undefine";
-	$hash->{SetFn}    = "DaikinCloud_Set";
-	$hash->{GetFn}    = "DaikinCloud_Get";
-	$hash->{AttrFn}   = "DaikinCloud_Attr";
+	$hash->{DefFn}    = 'DaikinCloud_Define';
+	$hash->{NotifyFn} = 'DaikinCloud_Notify';
+	$hash->{UndefFn}  = 'DaikinCloud_Undefine';
+	$hash->{SetFn}    = 'DaikinCloud_Set';
+	$hash->{GetFn}    = 'DaikinCloud_Get';
+	$hash->{AttrFn}   = 'DaikinCloud_Attr';
 }
 
 #######################################################################################################
@@ -59,21 +60,21 @@ sub DaikinCloud_Define($$)
 	my $type = shift @a; # always DaikinCloud
 	my $dev_id = (@a ? shift(@a) : undef);
 
-	return "Syntax: define <name> DaikinCloud [device-id]" if(int(@a));
+	return 'Syntax: define <name> DaikinCloud [device-id]' if(int(@a));
 
 	## handle define of indoor units
 	if (defined($dev_id)) {
 		my $defptr = $modules{DaikinCloud}{defptr}{IOMASTER};
-		return "Please define master device for cloud access first! Syntax: define <name> DaikinCloud" if(!defined($defptr));
-		return "Cannot modify master device to indoor unit device!" if($hash eq $modules{DaikinCloud}{defptr}{IOMASTER});
+		return 'Please define master device for cloud access first! Syntax: define <name> DaikinCloud' if(!defined($defptr));
+		return 'Cannot modify master device to indoor unit device!' if($hash eq $modules{DaikinCloud}{defptr}{IOMASTER});
 		$modules{DaikinCloud}{defptr}{$dev_id} = $hash;
-		setDevAttrList($name, "consumptionData:1,0 ". $readingFnAttributes);
+		setDevAttrList($name, 'consumptionData:1,0 '. $readingFnAttributes);
 		if ($init_done) {
-			CommandAttr(undef, "-silent ".$name.' devStateIcon on:Ventilator_wind@green off:Ventilator_fett@black');
-			CommandAttr(undef, "-silent ".$name.' event-on-change-reading .*');
-			CommandAttr(undef, "-silent ".$name.' room DaikinCloud_Devices');
-			CommandAttr(undef, "-silent ".$name.' webCmd onOffMode:setpoint:operationMode:swing:fanSpeed');
-			CommandAttr(undef, "-silent ".$name.' webCmdLabel Power<br>:Temperatur<br>:Modus<br>:Swing<br>:Drehzahl<br>');
+			CommandAttr(undef, '-silent '.$name.' devStateIcon on:Ventilator_wind@green off:Ventilator_fett@black');
+			CommandAttr(undef, '-silent '.$name.' event-on-change-reading .*');
+			CommandAttr(undef, '-silent '.$name.' room DaikinCloud_Devices');
+			CommandAttr(undef, '-silent '.$name.' webCmd onOffMode:setpoint:operationMode');
+			CommandAttr(undef, '-silent '.$name.' webCmdLabel Power<br>:Temperatur<br>:Modus<br>');
 		}
 	## handle define of IO-MASTER device as a bridge
 	} else {
@@ -82,12 +83,12 @@ sub DaikinCloud_Define($$)
 		$hash->{INTERVAL} = 60;
 		$hash->{VERSION} = $DaikinCloud_version;
 		$modules{DaikinCloud}{defptr}{IOMASTER} = $hash;
-		setDevAttrList($name, "autocreate:1,0 interval consumptionData:1,0 ". $readingFnAttributes);
+		setDevAttrList($name, 'autocreate:1,0 interval consumptionData:1,0 '. $readingFnAttributes);
 		if ($init_done) {
-			CommandAttr(undef, "-silent ".$name.' autocreate 1');
-			CommandAttr(undef, "-silent ".$name.' interval 60');
-			CommandAttr(undef, "-silent ".$name.' consumptionData 1');
-			CommandAttr(undef, "-silent ".$name.' room DaikinCloud_Devices');				
+			CommandAttr(undef, '-silent '.$name.' autocreate 1');
+			CommandAttr(undef, '-silent '.$name.' interval 60');
+			CommandAttr(undef, '-silent '.$name.' consumptionData 1');
+			CommandAttr(undef, '-silent '.$name.' room DaikinCloud_Devices');				
 		}
 	}
 	return undef;
@@ -101,14 +102,14 @@ sub DaikinCloud_Notify($$)
 {
 	my ($hash,$dev) = @_;
 	my $name = $hash->{NAME};
-	return if($dev->{NAME} ne "global");
+	return if($dev->{NAME} ne 'global');
 	return if(!grep(m/^INITIALIZED|REREADCFG$/, @{$dev->{CHANGED}}));
 	if ( my $token = ReadingsVal($name, '.access_token', undef) ) {
-		Log3 $name, 4, "DaikinCloud (Notify at start): restoring access_token from reading successful.";
+		Log3 $name, 4, 'DaikinCloud (Notify at start): restoring access_token from reading successful.';
 		$hash->{helper}{ACCESS_TOKEN} = $token;
 	}
 	if ( my $token = ReadingsVal($name, '.refresh_token', undef) ) {
-		Log3 $name, 4, "DaikinCloud (Notify at start): restoring refresh_token from reading successful.";
+		Log3 $name, 4, 'DaikinCloud (Notify at start): restoring refresh_token from reading successful.';
 		$hash->{helper}{REFRESH_TOKEN} = $token;
 	} 
 	return undef;
@@ -124,8 +125,8 @@ sub DaikinCloud_Undefine($$)
 	my $iomaster = $modules{DaikinCloud}{defptr}{IOMASTER};
 	
 	if ( defined($iomaster) && $hash eq $iomaster ) {
-		setKeyValue("DaikinCloud_username",undef);
-		setKeyValue("DaikinCloud_password",undef);
+		setKeyValue('DaikinCloud_username',undef);
+		setKeyValue('DaikinCloud_password',undef);
 		delete $modules{DaikinCloud}{defptr}{IOMASTER}; 
 		RemoveInternalTimer($hash);
 	}
@@ -172,38 +173,40 @@ sub DaikinCloud_setlist($)
 {
 	my ($hash) = @_;
 	## check if settable exists
-	my $settable = $hash->{helper}{settable}; 
-	return "No settable found! Please forceUpdate first! ","" if (!defined($settable) || (ref($settable) ne "HASH"));
-	## check the actual operation mode of the device
-	my $mode = ReadingsVal($hash->{NAME}, 'operationMode', "0");
-	return "No visible operationMode for this device! Please forceUpdate first! ","" if ($mode eq "0");
+	my $table = $hash->{helper}{table}; 
+	return 'No settable found! Please forceUpdate first! ','' if (!defined($table) || (ref($table) ne 'HASH'));	
 	## create setlist
-	my $setlist = "";
-	foreach my $key (sort keys %{$settable}) {
-		if ($key =~ m/_value_operationModes_([^_]+)/i) {
-			$setlist .= $settable->{$key}." " if ($mode eq $1);
+	my $setlist = '';
+	foreach my $key (sort keys %{$table}) {
+		if ($key =~ m/^([^:]+):.*_value_operationModes_([^_]+)/i) {
+			## check the actual operation mode of the device / managementpoint
+			my $appendix = '_'.$1;
+			my $mode2 = $2;
+			$appendix = '' if ($appendix =~ m/climateControl/i);
+			my $mode = ReadingsVal($hash->{NAME}, 'operationMode'.$appendix, '0');
+			$setlist .= $table->{$key}.' ' if ($mode eq $mode2);
 		}  else {
-			$setlist .= $settable->{$key}." ";					
+			$setlist .= $table->{$key}.' ';					
 		}
 	}
 	## merge vertical an horizontal entry to cmd "swing"
 	if (($setlist =~ m/vertical:/) && ($setlist =~ m/horizontal:/)) {
-		$setlist .= "swing:stop,horizontal,vertical,3dswing";
-		$setlist .= ",windNice" if ($setlist =~ m/windNice/);
-		$setlist .= " ";
+		$setlist .= 'swing:stop,horizontal,vertical,3dswing';
+		$setlist .= ',windNice' if ($setlist =~ m/windNice/);
+		$setlist .= ' ';
 	}
 	## merge fanMode and fanLevel entry to cmd "fanSpeed"
 	if (($setlist =~ m/fanLevel:slider/) && ($setlist =~ m/fanMode:([^ ]*)/)) {
 		my $nofixed = $1; 
 		$nofixed =~ s/,?fixed// ;
-		$setlist .= "fanSpeed:".$nofixed;
+		$setlist .= 'fanSpeed:'.$nofixed;
 		$setlist =~ m/fanLevel:slider,(\d+),(\d+),(\d+)/;
 		for (my $i = $1; $i <= $3; $i+=$2) { 
 			$setlist .= ",Level$i";
 		}	
 	}		
-	return "No settable found! Please forceUpdate first! ","" if ($setlist eq "");
-	return "",$setlist;
+	return 'No settable found! Please forceUpdate first! ','' if ($setlist eq '');
+	return '',$setlist;
 }
 
 #######################################################################################################
@@ -215,104 +218,116 @@ sub DaikinCloud_Set($$$$)
 	my ($hash, $name, @a) = @_;
 	return undef if not scalar @a;
 	my $cmd = shift @a;
-	my $value = join(" ", @a);
-	my $setlist = "";
+	my $value = join(' ', @a);
+	my $setlist = '';
 	my $iomaster = $modules{DaikinCloud}{defptr}{IOMASTER};
 	
-	if ( defined($iomaster) && $hash eq $iomaster ) {
+	if ( defined($iomaster) && ($hash eq $iomaster)) {
 	## set for IOMASTER
 		if ( lc($cmd) eq 'username'){
 			$value = DaikinCloud_encrypt($value);
-			setKeyValue("DaikinCloud_username",$value);
-			if (getKeyValue("DaikinCloud_username") eq $value) {
+			setKeyValue('DaikinCloud_username',$value);
+			if (getKeyValue('DaikinCloud_username') eq $value) {
 				readingsSingleUpdate($hash, 'state', 'username saved', 1 );
 				return;
 			}
 			readingsSingleUpdate($hash, 'state', 'error saving username', 1 );
-			return "Unknown error while saving username!"; 
+			return 'Unknown error while saving username!'; 
 		} elsif ( lc($cmd) eq 'password'){
 			$value = DaikinCloud_encrypt($value);
-			setKeyValue("DaikinCloud_password",$value);
-			if (getKeyValue("DaikinCloud_password") eq $value) {
+			setKeyValue('DaikinCloud_password',$value);
+			if (getKeyValue('DaikinCloud_password') eq $value) {
 				readingsSingleUpdate($hash, 'state', 'password saved', 1 );
 				return;
 			}
 			readingsSingleUpdate($hash, 'state', 'error saving password', 1 );
-			return "Unknown error while saving password!";
+			return 'Unknown error while saving password!';
 		} else {
-			$setlist = "username password";
+			$setlist = 'username password';
 		}
-	## set for indoor units	
-	} elsif (($cmd eq "?") || ($cmd eq "")) {
-		(undef,$setlist) = DaikinCloud_setlist($hash);		
+	## prepare setlist to show possible commands for indoor units	
+	} elsif (($cmd eq '?') || ($cmd eq '')) {
+		(undef,$setlist) = DaikinCloud_setlist($hash);
+		return "unknown argument $cmd : $value, choose one of $setlist";
+		
+	## set for indoor units
 	} else {
-		my $err = ""; 
+		my $err = ''; 
 		## check if device connected #fix v1.0.4
-		return "Cannot sent $cmd for $name to Daikin-Cloud, because unit is offline!" if (ReadingsVal($name, 'isCloudConnectionUp', "true" ) ne "true");
+		return "Cannot sent $cmd for $name to Daikin-Cloud, because unit is offline!" if (ReadingsVal($name, 'isCloudConnectionUp', 'unknown' ) eq 'false');
 		($err,$setlist) = DaikinCloud_setlist($hash);
-		return $err if ($err ne "");
-		my $mode = ReadingsVal($name, 'operationMode', "0");
-		return "No visible operationMode for this device! Please forceUpdate first! " if ($mode eq "0");
+		return $err if ($err ne '');
+		
+		## check actual mode/setpoint of the device / managementpoint
+		my $appendix = '';
+		$appendix = $1 if ($cmd =~ m/^[^_]+(_.*)$/i);
+		my $mode = ReadingsVal($name, 'operationMode'.$appendix, 'unknown');
+		my $setpoint = ReadingsVal($name, 'setpoint'.$appendix, 'unknown');
+				
 		if ($cmd =~ /setpoint|demandControl|fanMode|horizontal|vertical|econoMode|streamerMode|onOffMode|powerfulMode/i) {
-			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$mode); #fix v1.0.2
-		## quick command on|off for onOffMode #fix v1.1.0
+			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$mode);
+			
+		## quick command on|off for onOffMode 
 		} elsif ($cmd eq 'on' || $cmd eq 'off' ) {
 			$err .= DaikinCloud_CheckAndQueue($hash,'onOffMode',$cmd,$mode);
+			
 		## if fanLevel is set, the fanMode must be set to fixed	
 		} elsif ($cmd eq 'fanLevel' ) {
-			$err .= DaikinCloud_CheckAndQueue($hash,"fanMode","fixed",$mode);
-			$err .= DaikinCloud_CheckAndQueue($hash,"fanLevel",$value,$mode);
+			$err .= DaikinCloud_CheckAndQueue($hash,'fanMode','fixed',$mode);
+			$err .= DaikinCloud_CheckAndQueue($hash,'fanLevel',$value,$mode);
+			
 		## if fanSpeed is set, the correct mode must also be set
 		} elsif ($cmd eq 'fanSpeed' ) {
 			if ($value =~ m/Level(\d)/) {
-				$err .= DaikinCloud_CheckAndQueue($hash,"fanMode","fixed",$mode);
-				$err .= DaikinCloud_CheckAndQueue($hash,"fanLevel",$1,$mode);
+				$err .= DaikinCloud_CheckAndQueue($hash,'fanLevel',$1,$mode);
+				$err .= DaikinCloud_CheckAndQueue($hash,'fanMode','fixed',$mode);
 			} else {
-				$err .= DaikinCloud_CheckAndQueue($hash,"fanMode",$value,$mode);
+				$err .= DaikinCloud_CheckAndQueue($hash,'fanMode',$value,$mode);
 			}
-			readingsSingleUpdate($hash, $cmd, $value, 1 ) if ($err eq "");
+			readingsSingleUpdate($hash, $cmd, $value, 1 ) if ($err eq '');
+			
 	    ## if swing is set, the possible fanDirections (if available) has to be set
 		} elsif ($cmd eq 'swing' ) {
 			if ($value eq 'stop' ) {
-				$err .= DaikinCloud_CheckAndQueue($hash,"horizontal","stop",$mode)   if ($setlist =~ m/horizontal/i );
-				$err .= DaikinCloud_CheckAndQueue($hash,"vertical","stop",$mode)     if ($setlist =~ m/vertical/i );
+				$err .= DaikinCloud_CheckAndQueue($hash,'horizontal','stop',$mode)   if ($setlist =~ m/horizontal:/i );
+				$err .= DaikinCloud_CheckAndQueue($hash,'vertical','stop',$mode)     if ($setlist =~ m/vertical:/i );
 			} elsif  ($value eq 'horizontal' ) {
-				$err .= DaikinCloud_CheckAndQueue($hash,"horizontal","swing",$mode)  if ($setlist =~ m/horizontal/i );
-				$err .= DaikinCloud_CheckAndQueue($hash,"vertical","stop",$mode)     if ($setlist =~ m/vertical/i );
+				$err .= DaikinCloud_CheckAndQueue($hash,'horizontal','swing',$mode)  if ($setlist =~ m/horizontal:/i );
+				$err .= DaikinCloud_CheckAndQueue($hash,'vertical','stop',$mode)     if ($setlist =~ m/vertical:/i );
 			} elsif  ($value eq 'vertical' ) {
-				$err .= DaikinCloud_CheckAndQueue($hash,"horizontal","stop",$mode)   if ($setlist =~ m/horizontal/i );
-				$err .= DaikinCloud_CheckAndQueue($hash,"vertical","swing",$mode)    if ($setlist =~ m/vertical/i );
+				$err .= DaikinCloud_CheckAndQueue($hash,'horizontal','stop',$mode)   if ($setlist =~ m/horizontal:/i );
+				$err .= DaikinCloud_CheckAndQueue($hash,'vertical','swing',$mode)    if ($setlist =~ m/vertical:/i );
 			} elsif  ($value eq '3dswing' ) {
-				$err .= DaikinCloud_CheckAndQueue($hash,"horizontal","swing",$mode)  if ($setlist =~ m/horizontal/i );
-				$err .= DaikinCloud_CheckAndQueue($hash,"vertical","swing",$mode)    if ($setlist =~ m/vertical/i );
+				$err .= DaikinCloud_CheckAndQueue($hash,'horizontal','swing',$mode)  if ($setlist =~ m/horizontal:/i );
+				$err .= DaikinCloud_CheckAndQueue($hash,'vertical','swing',$mode)    if ($setlist =~ m/vertical:/i );
 			} elsif  ($value eq 'windNice' ) {
-				$err .= DaikinCloud_CheckAndQueue($hash,"vertical","windNice",$mode) if ($setlist =~ m/vertical/i );
+				$err .= DaikinCloud_CheckAndQueue($hash,'vertical','windNice',$mode) if ($setlist =~ m/vertical:/i );
 			}
-			readingsSingleUpdate($hash, $cmd, $value, 1 ) if ($err eq "");
+			readingsSingleUpdate($hash, $cmd, $value, 1 ) if ($err eq '');
 		## if demandValue is set, the demandControl must be set to fixed	
-		} elsif ($cmd eq 'demandValue' ) {
-			$err .= DaikinCloud_CheckAndQueue($hash,"demandControl","fixed",$mode);
+		} elsif ($cmd =~ m/demandValue/i ) {
 			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$mode);
+			$err .= DaikinCloud_CheckAndQueue($hash,'demandControl','fixed',$mode);
+			
 		## if operationMode ist changed, setpoint, fanLevel, fanMode and possible fanDirections has to be set
-		## fix v1.2.0 only report error when changing operationMode, not for additionally set-commands
-		} elsif ($cmd eq 'operationMode'){
-			if (($value ne "dry") && ($value ne "fanOnly")){
-				DaikinCloud_CheckAndQueue($hash,"setpoint",ReadingsVal($name,"setpoint","22"),$value);
+		} elsif ($cmd =~ m/operationMode/i ){
+			if (($value ne 'dry') && ($value ne 'fanOnly')){
+				DaikinCloud_CheckAndQueue($hash,'setpoint',$setpoint,$value);
 			}
-			DaikinCloud_CheckAndQueue($hash,"horizontal",ReadingsVal($name,"horizontal","stop"),$value) if ($setlist =~ m/horizontal/i );
-			DaikinCloud_CheckAndQueue($hash,"vertical",ReadingsVal($name,"vertical","stop"),$value) if ($setlist =~ m/vertical/i );
-			DaikinCloud_CheckAndQueue($hash,"fanMode",ReadingsVal($name,"fanMode","auto"),$value) if ($setlist =~ m/fanMode/i );
-			DaikinCloud_CheckAndQueue($hash,"fanLevel",ReadingsVal($name,"fanLevel","1"),$value) if ($setlist =~ m/fanLevel/i );
+			$err .= DaikinCloud_CheckAndQueue($hash,'horizontal',ReadingsVal($name,'horizontal','stop'),$value) if ($setlist =~ m/horizontal:/i );
+			$err .= DaikinCloud_CheckAndQueue($hash,'vertical',ReadingsVal($name,'vertical','stop'),$value) if ($setlist =~ m/vertical:/i );
+			$err .= DaikinCloud_CheckAndQueue($hash,'fanMode',ReadingsVal($name,'fanMode','auto'),$value) if ($setlist =~ m/fanMode:/i );
+			$err .= DaikinCloud_CheckAndQueue($hash,'fanLevel',ReadingsVal($name,'fanLevel','1'),$value) if ($setlist =~ m/fanLevel:/i );
 			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$value);
+			
 		} else {
 			$err .= "unknown argument $cmd, choose one of $setlist"; #fix v1.0.2
 		}
-		## all cmd & value are already in queue -> not send the cmd to the cloud
+		## all cmd & value are already in queue -> send the cmd to the cloud
 		$err .= DaikinCloud_SetCmd();
-		return $err if ($err ne "");
+		return $err if ($err ne '');
 		return undef;
 	}
-	return "unknown argument $cmd : $value, choose one of $setlist";
 }
 
 #######################################################################################################
@@ -322,43 +337,51 @@ sub DaikinCloud_Set($$$$)
 sub DaikinCloud_SetCmd()
 {
 	my $iomaster = $modules{DaikinCloud}{defptr}{IOMASTER};
-	return "No IOMASTER device found! " if (!defined($iomaster));
+	return 'No IOMASTER device found! ' if (!defined($iomaster));
 	
 	my $a_token = $iomaster->{helper}{ACCESS_TOKEN};
-	return "DaikinCloud_SetCmd: no access_token found." if (!defined($a_token));
+	return 'DaikinCloud_SetCmd: no access_token found! ' if (!defined($a_token));
 	
-	return "" if (!defined($iomaster->{helper}{setQueue}));
+	return '' if (!defined($iomaster->{helper}{setQueue}));
 	## take a triple of the queue
 	my $dev_id = shift @{$iomaster->{helper}{setQueue}};
 	my $path   = shift @{$iomaster->{helper}{setQueue}};
 	my $value  = shift @{$iomaster->{helper}{setQueue}};
-	return "" if (!defined($dev_id) || !defined($path) || !defined($value) );
+	return '' if (!defined($dev_id) || !defined($path) || !defined($value) );
+	
+#	## cancel actual polling if activ and schedules next regular polling 
+#	my $interval = $iomaster->{INTERVAL};
+#	if (defined($interval) && ($interval>0 ))  {
+#		RemoveInternalTimer($hash,'DaikinCloud_UpdateRequest');
+#		InternalTimer(gettimeofday()+$interval, 'DaikinCloud_UpdateRequest', $hash, 0);
+#	}	
 	
 	## prepare set cmd request
 	my $body->{value} = $value;
-	my ($datapoint, $datapath) =  ($path =~ m/([^_]+)(.*)/);
-	if (defined($datapath) && ($datapath ne "")) {
+	my ($embeddedId, $datapoint, $datapath) =  ($path =~ m/(.+):([^_]+)(.*)/);
+	return 'DaikinCloud_SetCmd: Missing managementpoint or datapoint! Please forceUpdate first! ' if ((!defined($datapoint)) || (!defined($embeddedId)));
+	if (defined($datapath) && ($datapath ne '')) {
 		$datapath =~ s/^_value//g;
 		$datapath =~ s/_/\//g;
 		$body->{path} = $datapath;
 	}
 	my $data = toJSON($body);
-	my $url  = "https://api.prod.unicloud.edc.dknadmin.be/v1/gateway-devices/".$dev_id;
-	   $url .= "/management-points/climateControl/characteristics/".$datapoint;
+	my $url  = 'https://api.prod.unicloud.edc.dknadmin.be/v1/gateway-devices/'.$dev_id;
+	   $url .= '/management-points/'.$embeddedId.'/characteristics/'.$datapoint;
 	
 	my $header = {
-		"user-agent" 	=> "Daikin/1.6.1.4681 CFNetwork/1209 Darwin/20.2.0",
-		"x-api-key"  	=> "xw6gvOtBHq5b1pyceadRp6rujSNSZdjx2AqT03iC",
-		"Authorization" => "Bearer ".$a_token,
-		"Content-Type"	=> "application/json",
+		'user-agent' 	=> 'Daikin/1.6.1.4681 CFNetwork/1209 Darwin/20.2.0',
+		'x-api-key'  	=> 'xw6gvOtBHq5b1pyceadRp6rujSNSZdjx2AqT03iC',
+		'Authorization' => 'Bearer '.$a_token,
+		'Content-Type'	=> 'application/json',
 	};
 	## save actual dev_id, cmd, value in params to give it back, when the cmd set fails
-	my $param = { url => $url , timeout => 5, method => "PATCH", hash => $iomaster, 
+	my $param = { url => $url , timeout => 5, method => 'PATCH', hash => $iomaster, 
 		header => $header, data => $data, dc_id => $dev_id, dc_path => $path, dc_value => $value,
 		callback => \&DaikinCloud_SetCmdResponse };
 		
 	HttpUtils_NonblockingGet($param);
-	return "";	
+	return '';	
 }
 
 sub DaikinCloud_SetCmdResponse($)
@@ -366,23 +389,24 @@ sub DaikinCloud_SetCmdResponse($)
 	my ($param, $err, $data) = @_;
 	my $hash = $param->{hash};
 	
-	if ($err ne "") {
+	if ($err ne '') {
 		Log3 $hash, 1, "DaikinCloud (SetCmd): $err";
 		
 	} elsif ($param->{code} == 401 ) {
 		readingsSingleUpdate($hash, 'status_setcmd', 'refreshing token ...', 1 );
+		Log3 $hash, 3, 'DaikinCloud (SetCmd): need to refresh access-token. Automatically starting DoRefresh!';
 		## give cmd back to queue, update token and transmit command after refresh token
 		unshift (@{$hash->{helper}{setQueue}},$param->{dc_id},$param->{dc_path},$param->{dc_value});
 		DaikinCloud_DoRefresh($hash);
 		
 	} elsif (($param->{code} == 200) || ($param->{code} == 204)) {
 		readingsSingleUpdate($hash, 'status_setcmd', 'command successfully submitted', 1 );
-		Log3 $hash, 5, "DaikinCloud (SetCmd): device ".$param->{dc_id}." path: ".$param->{dc_path}." value: ".$param->{dc_value};
+		Log3 $hash, 5, 'DaikinCloud (SetCmd): device '.$param->{dc_id}.' path: '.$param->{dc_path}.' value: '.$param->{dc_value};
 		DaikinCloud_SetCmd();
 		
 	} else {
 		readingsSingleUpdate($hash, 'status_setcmd', 'error in submitting command', 1 );
-		Log3 $hash, 2, "DaikinCloud (SetCmd): error setting command: ".$param->{data}." http-status-code: ".$param->{code}." data: ".$data;
+		Log3 $hash, 2, 'DaikinCloud (SetCmd): error setting command: '.$param->{data}.' http-status-code: '.$param->{code}.' data: '.$data;
 	}
 }
 
@@ -394,26 +418,26 @@ sub DaikinCloud_CheckAndQueue($$$$)
 {
 	my ($hash, $cmd, $value, $mode) = @_;
 	my $dev_id = $hash->{DEF};
-	return "Unknown Device-ID! " if (!defined($dev_id));
+	return 'Unknown Device-ID! ' if (!defined($dev_id));
 	my $iomaster = $modules{DaikinCloud}{defptr}{IOMASTER};
-	return "No IO-MASTER device found! " if (!defined($iomaster));
-	my $settable = $hash->{helper}{settable}; 
-	return "No settable in cache! Please forceUpdate first! " if (!defined($settable) || (ref($settable) ne "HASH"));
-	my $datapath= "";
+	return 'No IO-MASTER device found! ' if (!defined($iomaster));
+	my $table = $hash->{helper}{table}; 
+	return 'No settable in cache! Please forceUpdate first! ' if (!defined($table) || (ref($table) ne 'HASH'));
+	my $datapath= '';
 	## check if for the cmd exists a set-path 
-	foreach my $key (sort keys %{$settable}) {
+	foreach my $key (sort keys %{$table}) {
 		if ($key =~ m/_value_operationModes_([^_]+)/i) {
-			if (($1 eq $mode ) && ($settable->{$key} =~ m/^$cmd:/)) { 
+			if (($1 eq $mode ) && ($table->{$key} =~ m/^$cmd:/)) { 
 				$datapath = $key;
 			}
-		} elsif ($settable->{$key} =~ m/^($cmd):/) {
+		} elsif ($table->{$key} =~ m/^($cmd):/) {
 			$datapath = $key;
 		}
-		last if ($datapath ne "");
+		last if ($datapath ne '');
 	}
-	return "No datapath found for cmd: $cmd. : value: $value ! " if ( $datapath eq "");
+	return "No datapath found for cmd: $cmd. : value: $value ! " if ( $datapath eq '');
 	##check value
-	my ($options) = ($settable->{$datapath} =~ m/^$cmd:(.*)$/ );
+	my ($options) = ($table->{$datapath} =~ m/^$cmd:(.*)$/ );
 	## is it a range of possible values, then check min, max, step
 	if ($options =~ m/^slider,(\d+),(\d+\.?\d*),(\d+)/)  {
 		if (($value < $1 ) || ($value > $3) || ((($3-$value) / $2) != int(($3-$value) / $2))) {
@@ -421,24 +445,24 @@ sub DaikinCloud_CheckAndQueue($$$$)
 		## command and value are correct -> set them in queue
 		} else {
 			if (defined($iomaster->{helper}{setQueue}) && scalar(@{$iomaster->{helper}{setQueue}}) > 60) {
-				Log3 $hash, 3, "DaikinCloud (CheckAndQueue): too much set-commands in queue (>20)! Please check connection!";
-				return "Too much set-commands in queue (>20)! ";
+				Log3 $hash, 3, 'DaikinCloud (CheckAndQueue): too much set-commands in queue (>20)! Please check connection!';
+				return 'Too much set-commands in queue (>20)! ';
 			} else {
 				push( @{$iomaster->{helper}{setQueue}} , $dev_id , $datapath, $value);
 				readingsSingleUpdate($hash, $cmd, $value, 1 );
-				return "";
+				return '';
 			}	
 		}
 	## check if the possible values contain the set value
 	} elsif ($options =~ m/($value)/) {
 		## command and value are correct -> set them in queue
 		if (defined($iomaster->{helper}{setQueue}) && scalar(@{$iomaster->{helper}{setQueue}}) > 60) {
-			Log3 $hash, 3, "DaikinCloud (CheckAndQueue): too much set-commands in queue (>20)! Please check connection!";
-			return "Too much set-commands in queue (>20)! ";
+			Log3 $hash, 3, 'DaikinCloud (CheckAndQueue): too much set-commands in queue (>20)! Please check connection!';
+			return 'Too much set-commands in queue (>20)! ';
 		} else {
 			push( @{$iomaster->{helper}{setQueue}} , $dev_id , $datapath, $value);
 			readingsSingleUpdate($hash, $cmd, $value, 1 );
-			return "";
+			return '';
 		}	
 	} else {
 		return "cmd: $cmd. value: $value is no possible option ($options)! ";
@@ -454,53 +478,53 @@ sub DaikinCloud_Get($$@)
 	my ($hash, $name, @a) = @_;
 	return undef if not scalar @a;
 	my $cmd = shift(@a);
-	my $value = join(" ", @a);
-	my $setlist = "";
+	my $value = join(' ', @a);
+	my $setlist = '';
 	my $iomaster = $modules{DaikinCloud}{defptr}{IOMASTER};
 
 	if ( defined($iomaster) && $hash eq $iomaster ) {
 	## get for IOMASTER
 		if ( lc($cmd) eq 'tokenset') {
-			my (undef, $username) = getKeyValue("DaikinCloud_username");
-			return "Please set username first!" if ( !defined($username) );
-			my (undef, $password) = getKeyValue("DaikinCloud_password");
-			return "Please set password first!" if ( !defined($password) );
+			my (undef, $username) = getKeyValue('DaikinCloud_username');
+			return 'Please set username first!' if ( !defined($username) );
+			my (undef, $password) = getKeyValue('DaikinCloud_password');
+			return 'Please set password first!' if ( !defined($password) );
 			return DaikinCloud_DoAuthorizationRequest($hash);
 			
 		} elsif ( lc($cmd) eq 'refreshtoken') {
 			my $r_token = $hash->{helper}{REFRESH_TOKEN} ;
-			return "Please first get the tokenSet!" if ( !defined($r_token ) );
+			return 'Please first get the tokenSet!' if ( !defined($r_token ) );
 			return DaikinCloud_DoRefresh($hash);
 			
 		} elsif ( lc($cmd) eq 'forceupdate') {
 			my $a_token = $hash->{helper}{ACCESS_TOKEN} ;
-			return "Please first get the tokenSet!" if ( !defined($a_token) );
+			return 'Please first get the tokenSet!' if ( !defined($a_token) );
 			DaikinCloud_UpdateRequest($hash);
-			return "Going to update device data.";
+			return 'Going to update device data.';
 		## fix v1.2.0 implement get rawData	
 		} elsif ( lc($cmd) eq 'rawdata') {
 			my $a_token = $hash->{helper}{ACCESS_TOKEN} ;
-			return "Please first get the tokenSet!" if ( !defined($a_token) );
+			return 'Please first get the tokenSet!' if ( !defined($a_token) );
 			return DaikinCloud_RequestRawData($hash);
 						
 		} else {
-			$setlist="forceUpdate:noArg tokenSet:noArg refreshToken:noArg rawData:noArg";
+			$setlist='forceUpdate:noArg tokenSet:noArg refreshToken:noArg rawData:noArg';
 		}
 	## get for indoor units
     } elsif ( lc($cmd) eq 'forceupdate') {
 		my $a_token = $iomaster ->{helper}{ACCESS_TOKEN} if (defined($iomaster));
-		return "Please first get the tokenSet!" if ( !defined($a_token) );
+		return 'Please first get the tokenSet!' if ( !defined($a_token) );
 		DaikinCloud_UpdateRequest($hash);
-		return "Going to update device data.";
+		return 'Going to update device data.';
 	} elsif ($cmd eq 'setlist') {
 		my ($err,$setcmd) = DaikinCloud_setlist($hash) ;
 		$setcmd =~ s/ /\r\n/g;
-		return $err if ($err ne "");
+		return $err if ($err ne '');
 		return $setcmd;
 	} else {
-		$setlist="forceUpdate:noArg setlist:noArg";
+		$setlist='forceUpdate:noArg setlist:noArg';
 	}
-	return "unknown argument $cmd, choose one of $setlist" if ($setlist ne "");
+	return "unknown argument $cmd, choose one of $setlist" if ($setlist ne '');
 	return undef;
 }
 
@@ -517,7 +541,7 @@ sub DaikinCloud_Attr($$)
 	## handle the change of IOMASTER attributes
 		## handle the change of polling-interval
 		if ( $attrName eq 'interval' ) {
-			if ( $cmd eq "del" ) {
+			if ( $cmd eq 'del' ) {
 				$attrVal = 0;
 			}
 			if ( $attrVal == 0 ) {
@@ -531,15 +555,15 @@ sub DaikinCloud_Attr($$)
 			$hash->{INTERVAL} = int($attrVal);
 		## delete all energy_ readings if consumptionData in IOMASTER is deleted or "0"
 		} elsif ( $attrName eq 'consumptionData' ) {
-			if (( $cmd eq "del" ) || ( $attrVal == 0 )) {
-				CommandDeleteReading(undef,"-q TYPE=DaikinCloud ^energy_.*");
-				CommandDeleteReading(undef,"-q TYPE=DaikinCloud ^kWh_.*");				
+			if (( $cmd eq 'del' ) || ( $attrVal == 0 )) {
+				CommandDeleteReading(undef,'-q TYPE=DaikinCloud ^energy_.*');
+				CommandDeleteReading(undef,'-q TYPE=DaikinCloud ^kWh_.*');				
 			}	
 		} 
 	## handle the change of indoor units attributes
 	} elsif ( $attrName eq 'consumptionData' ) {
-		if (( $cmd eq "del" ) || ( $attrVal == 0 )) {
-			CommandDeleteReading(undef,"-q $name ^energy_.*");				
+		if (( $cmd eq 'del' ) || ( $attrVal == 0 )) {
+			CommandDeleteReading(undef,'-q $name ^energy_.*');				
 		}
 	}			
 	return undef;  
@@ -548,26 +572,26 @@ sub DaikinCloud_Attr($$)
 sub DaikinCloud_RequestRawData($)
 {
 	my $hash = $modules{DaikinCloud}{defptr}{IOMASTER};
-	return "DaikinCloud_RequestRawData: error (0) no IOMASTER device found!" if (!defined($hash));
+	return 'DaikinCloud_RequestRawData: error (0) no IOMASTER device found!' if (!defined($hash));
 	my $a_token = $hash->{helper}{ACCESS_TOKEN};
 	if (!defined($a_token)) {
 		readingsSingleUpdate($hash, 'state', 'no access-token', 1 );
-		return "DaikinCloud_RequestRawData: error (1) no access_token found." 
+		return 'DaikinCloud_RequestRawData: error (1) no access_token found.' 
 	};
 	## define the header of the request with Bearer and access_token
 	my $header = {
-		"user-agent" 	=> "Daikin/1.6.1.4681 CFNetwork/1209 Darwin/20.2.0",
-		"x-api-key"  	=> "xw6gvOtBHq5b1pyceadRp6rujSNSZdjx2AqT03iC",
-		"Authorization" => "Bearer ".$a_token,
-		"Content-Type"	=> "application/json",
+		'user-agent' 	=> 'Daikin/1.6.1.4681 CFNetwork/1209 Darwin/20.2.0',
+		'x-api-key'  	=> 'xw6gvOtBHq5b1pyceadRp6rujSNSZdjx2AqT03iC',
+		'Authorization' => 'Bearer '.$a_token,
+		'Content-Type'	=> 'application/json',
 	};	
-	my $param = { timeout => 5, method => "GET", header => $header,
-	              url => "https://api.prod.unicloud.edc.dknadmin.be/v1/gateway-devices" };
+	my $param = { timeout => 5, method => 'GET', header => $header,
+	              url => 'https://api.prod.unicloud.edc.dknadmin.be/v1/gateway-devices' };
 	## do the request
 	my ($err,$response) = HttpUtils_BlockingGet($param);
-	return "DaikinCloud_RequestRawData: error (2) $err" if($err ne "");
-	return "DaikinCloud_RequestRawData: error (2) need refresh access-token! http-statuscode: 401" if ($param->{code} == 401 );
-	return "DaikinCloud_RequestRawData: error (2) HTTP-Status-Code: ".$param->{code} if (($param->{code} != 200) || ($response eq ""));
+	return "DaikinCloud_RequestRawData: error (2) $err" if($err ne '');
+	return 'DaikinCloud_RequestRawData: error (2) need refresh access-token! http-statuscode: 401' if ($param->{code} == 401 );
+	return 'DaikinCloud_RequestRawData: error (2) HTTP-Status-Code: '.$param->{code} if (($param->{code} != 200) || ($response eq ''));
 	return $response;	
 }
 
@@ -581,7 +605,7 @@ sub	DaikinCloud_UpdateRequest($)
 	## my ($hash) = @_;
 	## start UpdateRequest always as IOMASTER, because there is the tokenSet 
 	my $hash = $modules{DaikinCloud}{defptr}{IOMASTER};
-	return "DaikinCloud_UpdateRequest: error (0) no IOMASTER device found!" if (!defined($hash));
+	return 'DaikinCloud_UpdateRequest: error (0) no IOMASTER device found!' if (!defined($hash));
 	## is fhem start finished ? -> no -> wait 1 second
 	if (!$init_done) {
 		InternalTimer(gettimeofday()+1, 'DaikinCloud_UpdateRequest', $hash, 0);
@@ -590,14 +614,14 @@ sub	DaikinCloud_UpdateRequest($)
 	my $a_token = $hash->{helper}{ACCESS_TOKEN};
 	if (!defined($a_token)) {
 		readingsSingleUpdate($hash, 'state', 'no access-token', 1 );
-		return "DaikinCloud_UpdateRequest: error (1) no access_token found." 
+		return 'DaikinCloud_UpdateRequest: error (1) no access_token found.' 
 	};
-	return "BlockingCall is almost running. Please wait!" if (defined($hash->{helper}{RUNNING_CALL}));
+	return 'BlockingCall is almost running. Please wait!' if (defined($hash->{helper}{RUNNING_CALL}));
 	
 	## prepare subprocess
-	$hash->{helper}{RUNNING_CALL} = BlockingCall("DaikinCloud_BlockUpdate",$hash->{NAME},
-												 "DaikinCloud_BlockUpdateDone",15,
-												 "DaikinCloud_BlockUpdateAbort",$hash); 
+	$hash->{helper}{RUNNING_CALL} = BlockingCall('DaikinCloud_BlockUpdate',$hash->{NAME},
+												 'DaikinCloud_BlockUpdateDone',15,
+												 'DaikinCloud_BlockUpdateAbort',$hash); 
 	$hash->{helper}{RUNNING_CALL}->{loglevel} = 4;
 	## schedules next polling
 	my $interval = $hash->{INTERVAL};
@@ -618,37 +642,37 @@ sub DaikinCloud_BlockUpdateDone($)
 	my $hash = $defs{$name};
 	
 	if (!defined($hash->{NAME})) { ## should never happen
-		Log 1, "DaikinCloud (BlockUpdateDone): error in device hash!";
+		Log 1, 'DaikinCloud (BlockUpdateDone): error in device hash!';
 		return;
 	}
 	delete ($hash->{helper}{RUNNING_CALL});
 	
 	if ($values[0]  =~ m/^error.*need refresh access-token/i ) {
 		readingsSingleUpdate($hash, 'update_response', $values[0] , 1 );
-		Log3 $hash, 3, "DaikinCloud (BlockUpdateDone): need to refresh access-token. Automatically starting DoRefresh!";
+		Log3 $hash, 3, 'DaikinCloud (BlockUpdateDone): need to refresh access-token. Automatically starting DoRefresh!';
 		DaikinCloud_DoRefresh($hash);
 		return;
 	}	
 	if ($values[0]  =~ m/^error/i ) {
 		readingsSingleUpdate($hash, 'update_response', $values[0] , 1 );
-		Log3 $hash, 2, "DaikinCloud (BlockUpdateDone): ".$string;
+		Log3 $hash, 2, 'DaikinCloud (BlockUpdateDone): '.$string;
 		return;
 	}	
 	readingsSingleUpdate($hash, 'update_response', 'successful', 1 );
 	
 	## update readings
 	while (scalar(@values)>1) {
-		if ($values[0] eq "SETTABLESDEVICEID") {
+		if ($values[0] eq 'SETTABLESDEVICEID') {
 			last;
-		} elsif (($values[0] eq "FHEMDEVICEID") && ($values[2] eq "NAME")) {
+		} elsif (($values[0] eq 'FHEMDEVICEID') && ($values[2] eq 'NAME')) {
 			shift @values; my $dev_id = shift @values;
-			shift @values; my $dev_name = shift @values;
+			shift @values; my $dev_name = shift @values;			
 			readingsSingleUpdate($hash, $dev_name, $dev_id, 1 );
 			my $defptr = $modules{DaikinCloud}{defptr}{$dev_id};
 			## if not defined -> check if autocreate is set -> then define device
 			if (!defined($defptr)) {
-				if (AttrVal($name,"autocreate",undef)) {
-					$dev_name = "DaikinCloud_".$dev_name;
+				if (AttrVal($name,'autocreate',undef)) {
+					$dev_name = 'DaikinCloud_'.$dev_name;
 					$dev_name =~ s/[^A-Za-z0-9_]/_/g;
 					my $define = "$dev_name DaikinCloud $dev_id";
 					if( my $cmdret = CommandDefine(undef,$define) ) {
@@ -661,7 +685,7 @@ sub DaikinCloud_BlockUpdateDone($)
 			if (defined($defptr)) {
 				readingsBeginUpdate($defptr);					
 				while (scalar(@values)>1) {
-					if (($values[0] ne "FHEMDEVICEID") && ($values[0] ne "SETTABLESDEVICEID")) {
+					if (($values[0] ne 'FHEMDEVICEID') && ($values[0] ne 'SETTABLESDEVICEID')) {
 						readingsBulkUpdate($defptr, shift @values, shift @values);
 					} else {
 						last;
@@ -675,23 +699,23 @@ sub DaikinCloud_BlockUpdateDone($)
 		}			
 	}
 	## create settable for each indoor unit device
-	my %settables;
+	my %table;
 	while (scalar(@values)>1) {
-		if ($values[0] eq "SETTABLESDEVICEID") {
+		if ($values[0] eq 'SETTABLESDEVICEID') {
 			shift @values; my $dev_id = shift @values;
-			while ((scalar(@values)>1) && ($values[0] ne "SETTABLESDEVICEID")) {
-				$settables{$dev_id}{$values[0]} = $values[1];
+			while ((scalar(@values)>1) && ($values[0] ne 'SETTABLESDEVICEID')) {
+				$table{$dev_id}{$values[0]} = $values[1];
 				shift @values; 
 				shift @values;
 			}
 		}
 	}
 	## save possbible set cmds and datapoints to each indoor unit device
-	foreach my $key (sort keys %settables) {
+	foreach my $key (sort keys %table) {
 		my $defptr = $modules{DaikinCloud}{defptr}{$key};
 		if (defined($defptr)) {
-			delete $defptr->{helper}{settable} if (defined($defptr->{helper}{settable}));
-			$defptr->{helper}{settable} = $settables{$key};
+			delete $defptr->{helper}{table} if (defined($defptr->{helper}{table}));
+			$defptr->{helper}{table} = $table{$key};
 		}
 	}	
 }		
@@ -700,7 +724,7 @@ sub DaikinCloud_BlockUpdateAbort($)
 { 
 	my ($hash) = @_; 
 	delete ($hash->{helper}{RUNNING_CALL});
-	Log3 $hash, 3, "DaikinCloud (BlockUpdateAbort): BlockingCall aborted (timeout).";
+	Log3 $hash, 3, 'DaikinCloud (BlockUpdateAbort): BlockingCall aborted (timeout).';
 }
 
 ## child process
@@ -708,220 +732,219 @@ sub DaikinCloud_BlockUpdate($)
 {
 	my ($name) = @_;
 	my $hash = $defs{$name};
-	return $name."|error (1) in device hash!" if (!defined($hash) || !defined($hash->{NAME}));
+	return $name.'|error (1) in device hash!' if (!defined($hash) || !defined($hash->{NAME}));
 	## is access-token available?!
 	my $a_token = $hash ->{helper}{ACCESS_TOKEN};
-	return $name."|error (2) no access_token found." if (!defined($a_token));
+	return $name.'|error (2) no access_token found.' if (!defined($a_token));
 	## define the header of the request with Bearer and access_token
 	my $header = {
-		"user-agent" 	=> "Daikin/1.6.1.4681 CFNetwork/1209 Darwin/20.2.0",
-		"x-api-key"  	=> "xw6gvOtBHq5b1pyceadRp6rujSNSZdjx2AqT03iC",
-		"Authorization" => "Bearer ".$a_token,
-		"Content-Type"	=> "application/json",
+		'user-agent' 	=> 'Daikin/1.6.1.4681 CFNetwork/1209 Darwin/20.2.0',
+		'x-api-key'  	=> 'xw6gvOtBHq5b1pyceadRp6rujSNSZdjx2AqT03iC',
+		'Authorization' => 'Bearer '.$a_token,
+		'Content-Type'	=> 'application/json',
 	};	
-	my $param = { timeout => 5, method => "GET", header => $header,
-	              url => "https://api.prod.unicloud.edc.dknadmin.be/v1/gateway-devices" };
+	my $param = { timeout => 5, method => 'GET', header => $header,
+	              url => 'https://api.prod.unicloud.edc.dknadmin.be/v1/gateway-devices' };
 	## do the request
 	my ($err,$response) = HttpUtils_BlockingGet($param);
-	return $name."|error (3) $err" if($err ne "");
-	return $name."|error (3) need refresh access-token! http-statuscode: 401" if ($param->{code} == 401 );
-	return $name."|error (3) HTTP-Status-Code: ".$param->{code} if (($param->{code} != 200) || ($response eq ""));
+	return $name."|error (3) $err" if($err ne '');
+	return $name.'|error (3) need refresh access-token! http-statuscode: 401' if ($param->{code} == 401 );
+	return $name.'|error (3) HTTP-Status-Code: '.$param->{code} if (($param->{code} != 200) || ($response eq ''));
 
-    my %embeddedIds;
-	my %dev_id;
-	my %devicedata;
-	my %pseudomap;
-	my %settables;
+    my %emID;   ## embeddedIds
+	my %dev_id; ## device-ids
+	my %dp;     ## traversed datapoints    {device-id}{managementpoint}{datapointpath} = value 
+	my %dd;     ## devicedata for readings {device-id}{readingsname} = value
+	my %table;  ## settable for possible set-commands
+	my %period = ( m => 'year', w => 'week', d => 'day' );
 	
-	my $neg_filter = "schedule|consumptionData";	
-	$neg_filter = "schedule" if (AttrVal($hash->{NAME},"consumptionData",undef)); 
-	
+	my $neg_filter = 'schedule|consumptionData';	
+	$neg_filter = 'schedule' if (AttrVal($hash->{NAME},'consumptionData',undef)); 
+
 	## convert take some times ...
-	my $return_json = json2nameValue($response,"_",\%pseudomap,"",$neg_filter); #($in, $prefix, $map, $filter, $negFilter)
+	my $raw = json2nameValue($response,'_',\%table,'',$neg_filter); #($in, $prefix, $map, $filter, $negFilter)
 	
 	## get device-ids and embedded-ids
-	foreach my $key (sort keys %{$return_json}) {
+	foreach my $key (sort keys %{$raw}) {
 		if ($key =~ m/_id$/i ) {
 			my ($nr) = ($key =~ m/^_(\d+)_/i );
-			$dev_id{$nr} = $return_json->{$key} if (defined($nr));
+			$dev_id{$nr} = $raw->{$key} if (defined($nr));
 		} elsif ($key =~ m/embeddedId$/i ) {
 			my ($nr,$mp) = ($key =~ m/^_(\d+)_managementPoints_(\d+)_/i );
-			$embeddedIds{$nr}{$mp} = $return_json->{$key} if (defined($nr) && defined($mp));	
+			$emID{$nr}{$mp} = $raw->{$key} if (defined($nr) && defined($mp));	
 		} 		
 	}
 	
-	## traverse data in devicedata{device-ID}{datapointpath} = value
-	## traverse data in settables{device-ID}{datapointsubpath} = values | slider,min,step,max
-	foreach my $key (sort keys %{$return_json}) {
+	## traverse data in {device-id}{managementpoint}{datapointpath} = value 
+	foreach my $key (sort keys %{$raw}) {
 		my ($nr) = ($key =~ m/^_(\d+)_/i );
-		my ($mp) = ($key =~ m/managementPoints_(\d+)_/i );
-		if (!defined($mp)) {
-			## traverse root informations
+		my ($mp,$skey) = ($key =~ m/managementPoints_(\d+)__?(.*)/i );
+		if (!defined($mp) || !defined($skey)) {
 			my ($dat) = ($key =~ m/^_\d+__?([^_]*)/i );
-			$devicedata{$dev_id{$nr}}{$dat} = $return_json->{$key}; 
-		} else {
-			## filter settable entrys
-			## fix v1.2.0 only settable for climateControl
-			if (($key =~ m/_settable$/i ) && ($embeddedIds{$nr}{$mp} eq "climateControl")) {
-				if ($return_json->{$key} eq "true") {
-					my ($path) = ($key =~ m/^(.*)_settable$/i );
-					## save range und step to "$settables" if min, max and step ist available
-					## for setcmds: setpoint, demandValue, fanLevel
-					if ( defined($return_json->{$path."_minValue"}) && defined($return_json->{$path."_maxValue"}) 
-						&& defined($return_json->{$path."_stepValue"})) {
-						my ($subpath) =	($key =~ m/managementPoints_\d+_(.*)_settable$/i );
-						my $setcmd = $subpath;
-						if ($subpath =~ m/temperatureControl_value_operationModes/i) {
-							$setcmd = "setpoint";
-						} elsif ($subpath =~ m/demandControl_value_modes_fixed/i) {
-							$setcmd = "demandValue";
-						} elsif ($subpath =~ m/_fanSpeed_modes_fixed/i) {
-							$setcmd = "fanLevel";
-						} 
-						$settables{$dev_id{$nr}}{$subpath} = $setcmd.":slider,".$return_json->{$path."_minValue"}.","
-							.$return_json->{$path."_stepValue"}.",".$return_json->{$path."_maxValue"}.",1";
-					## save	possible options (values_1 bis max values_10) to "settables" 
-					## for setcmds: demandControl, fanMode, horizontal, vertical and other settables
-					} elsif ( defined($return_json->{$path."_values_1"})) {
-						my ($subpath) =	($key =~ m/managementPoints_\d+_(.*)_settable$/i );
-						my $setcmd = $subpath;
-						if ($subpath =~ m/demandControl_value_currentMode/i) {
-							$setcmd = "demandControl";
-						} elsif ($subpath =~ m/_fanSpeed_currentMode/i) {
-							$setcmd = "fanMode";
-						} elsif ($subpath =~ m/_fanDirection_horizontal_currentMode/i) {
-							$setcmd = "horizontal";
-						} elsif ($subpath =~ m/_fanDirection_vertical_currentMode/i) {
-							$setcmd = "vertical";
-						} elsif ($subpath =~ m/_fanDirection_vertical_currentMode/i) {
-							$setcmd = "vertical";
-						} 
-						$settables{$dev_id{$nr}}{$subpath} = $setcmd.":";
-						for (my $i = 1; $i < 10; $i++) {
-							if ( defined($return_json->{$path."_values_".$i})) {
-								if ($return_json->{$path."_values_".$i} ne "scheduled") {
-									$settables{$dev_id{$nr}}{$subpath} .= $return_json->{$path."_values_".$i} .",";
-								}
-							}						
-						}
-						chop($settables{$dev_id{$nr}}{$subpath}); # delete last komma
-					}				
-				}
-			## filter data entrys (only entrys end with "_value" are stored) to "$devicedata"
-			} elsif ($key =~ m/managementPoints_\d+_(.*)_value$/i ) { 
-				my $point = $1;
-				if (($key =~ m/(isInErrorState|isInCautionState|errorCode)/i) || (defined ($devicedata{$dev_id{$nr}}{$point}))) {
-					$point .= "_".$embeddedIds{$nr}{$mp};
-				}
-				$devicedata{$dev_id{$nr}}{$point} = $return_json->{$key};	
-			} elsif ($key =~ m/consumptionData_value_electrical_(.*_[m|w|d]_\d+)$/i ) {
-				$devicedata{$dev_id{$nr}}{"energy_".$1} = $return_json->{$key};
-			}
-		}	
+			$dd{$dev_id{$nr}}{$dat} = $raw->{$key};
+		} else {					   
+			$dp{$dev_id{$nr}}{$emID{$nr}{$mp}}{$skey} = $raw->{$key};
+			$dd{$dev_id{$nr}}{'managementPoint_Nr_'.$mp} = $emID{$nr}{$mp};
+		}			
 	}
 	
-	## clean data of actual unused mode-data, shorten and correct some keynames
-	foreach my $key (sort keys %devicedata) {
-		my $mode = defined($devicedata{$key}{operationMode})?$devicedata{$key}{operationMode}:"";
+	## explore data for each detected device-id
+	foreach my $devID (sort keys %dp) {
 		my $eopt = 0;
-		my $dev_name = $modules{DaikinCloud}{defptr}{$key}->{NAME};
-		$eopt = AttrVal($dev_name,"consumptionData",0) if (defined($dev_name));		
-		if (ref($devicedata{$key}) eq "HASH"){
-			##fix v1.1.0 calculate kWh year
-			my ($kWh_h_y, $kWh_h_d, $kWh_h_w, $kWh_c_y, $kWh_c_d, $kWh_c_w) = (0,0,0,0,0,0); 
-			for (my $i=13; $i<25; $i++) {
-				$kWh_h_y += $devicedata{$key}{'energy_heating_m_'.$i} if (defined($devicedata{$key}{'energy_heating_m_'.$i}) && looks_like_number($devicedata{$key}{'energy_heating_m_'.$i}));
-				$kWh_h_d += $devicedata{$key}{'energy_heating_d_'.$i} if (defined($devicedata{$key}{'energy_heating_d_'.$i}) && looks_like_number($devicedata{$key}{'energy_heating_d_'.$i}));
-				$kWh_c_y += $devicedata{$key}{'energy_cooling_m_'.$i} if (defined($devicedata{$key}{'energy_cooling_m_'.$i}) && looks_like_number($devicedata{$key}{'energy_cooling_m_'.$i}));
-				$kWh_c_d += $devicedata{$key}{'energy_cooling_d_'.$i} if (defined($devicedata{$key}{'energy_cooling_d_'.$i}) && looks_like_number($devicedata{$key}{'energy_cooling_d_'.$i}));
-			}
-			for (my $i=8; $i<16; $i++) {
-				$kWh_h_w += $devicedata{$key}{'energy_heating_w_'.$i} if (defined($devicedata{$key}{'energy_heating_w_'.$i}) && looks_like_number($devicedata{$key}{'energy_heating_w_'.$i}));
-				$kWh_c_w += $devicedata{$key}{'energy_cooling_w_'.$i} if (defined($devicedata{$key}{'energy_cooling_w_'.$i}) && looks_like_number($devicedata{$key}{'energy_cooling_w_'.$i}));
-			}			
-			$devicedata{$key}{kWh_heating_year} = $kWh_h_y;
-			$devicedata{$key}{kWh_heating_day}  = $kWh_h_d;
-			$devicedata{$key}{kWh_heating_week} = $kWh_h_w;
-			$devicedata{$key}{kWh_cooling_year} = $kWh_c_y;
-			$devicedata{$key}{kWh_cooling_day}  = $kWh_c_d;
-			$devicedata{$key}{kWh_cooling_week} = $kWh_c_w;
-			##endfix v1.1.0 
+		my $dev_name = $modules{DaikinCloud}{defptr}{$devID}->{NAME};
+		$eopt = AttrVal($dev_name,'consumptionData',0) if (defined($dev_name));
+		
+		## handle each management-point seperatly
+		foreach my $mp (sort keys %{$dp{$devID}}) {
 			
-			foreach my $subkey (sort keys %{$devicedata{$key}}) {
-				## search for all operation-mode-keys
-				if ($subkey =~ m/_value_operationModes_/i) {
-					## if datapoint equal actual $mode, take the value and shorten the key
-					if ($subkey =~ m/_value_operationModes_($mode)_(.*)$/i) {
-						my $para = $2;
-						if ( $para  =~ m/fanDirection_horizontal/i ) {
-							$devicedata{$key}{horizontal} = $devicedata{$key}{$subkey};
-						} elsif ( $para  =~ m/fanDirection_vertical/i ) {
-							$devicedata{$key}{vertical} = $devicedata{$key}{$subkey};
-						} elsif ( $para  =~ m/fanSpeed_currentMode/i ) {
-							$devicedata{$key}{fanMode} = $devicedata{$key}{$subkey};
-						} elsif ( $para  =~ m/fanSpeed_modes_fixed/i ) {
-							$devicedata{$key}{fanLevel} = $devicedata{$key}{$subkey};
-						} elsif ( $para  =~ m/setpoints_roomTemperature/i ) {
-							$devicedata{$key}{setpoint} = $devicedata{$key}{$subkey};
+			## check actual mode to store only real values of the actual mode
+			my $mode = '';
+			$mode = $dp{$devID}{$mp}{operationMode_value} if (defined($dp{$devID}{$mp}{operationMode_value}));
+			
+			## append managementpoint to avoid doubles if managementpoint is not climateControl
+			my $appendix = '';
+			$appendix = '_'.$mp if ($mp !~ m/climateControl/i);
+			
+			## check each key entry of the managementpoint
+			foreach my $key (sort keys %{$dp{$devID}{$mp}}) {
+				
+				## filter settable entrys
+				if ($key =~ m/_settable$/i ) {
+					if ($dp{$devID}{$mp}{$key} eq 'true') {
+						my ($path) = ($key =~ m/^(.*)_settable$/i );
+						my $setcmd = $path;
+						## save range und step to "$table" if min, max and step ist available
+						## for setcmds: setpoint, demandValue, fanLevel
+						if (defined($dp{$devID}{$mp}{$path.'_minValue'}) 
+							&& defined($dp{$devID}{$mp}{$path.'_maxValue'}) 
+							&& defined($dp{$devID}{$mp}{$path.'_stepValue'})) 
+						{							
+							if ($path =~ m/temperatureControl_value_operationModes/i) {
+								$setcmd = 'setpoint';
+							} elsif ($path =~ m/demandControl_value_modes_fixed/i) {
+								$setcmd = 'demandValue';
+							} elsif ($path =~ m/_fanSpeed_modes_fixed/i) {
+								$setcmd = 'fanLevel';
+							}
+							## append managementpoint to avoid doubles
+							$table{$devID}{$mp.':'.$path} = $setcmd.$appendix.':slider,'
+							.$dp{$devID}{$mp}{$path.'_minValue' }.','
+							.$dp{$devID}{$mp}{$path.'_stepValue'}.','
+							.$dp{$devID}{$mp}{$path.'_maxValue' }.',1';
+						## save	possible options (values_1 bis max values_10) to "table" 
+						## for setcmds: demandControl, fanMode, horizontal, vertical and other table	
+						} elsif (defined($dp{$devID}{$mp}{$path.'_values_1'})) {
+							if ($path =~ m/demandControl_value_currentMode/i) {
+								$setcmd = 'demandControl';
+							} elsif ($path =~ m/_fanSpeed_currentMode/i) {
+								$setcmd = 'fanMode';
+							} elsif ($path =~ m/_fanDirection_horizontal_currentMode/i) {
+								$setcmd = 'horizontal';
+							} elsif ($path =~ m/_fanDirection_vertical_currentMode/i) {
+								$setcmd = 'vertical';
+							} 						
+							$table{$devID}{$mp.':'.$path} = $setcmd.$appendix.':';
+							for (my $i = 1; $i < 10; $i++) {
+								if (defined($dp{$devID}{$mp}{$path.'_values_'.$i})) {
+									if ($dp{$devID}{$mp}{$path.'_values_'.$i} ne 'scheduled') {
+										$table{$devID}{$mp.':'.$path} .= $dp{$devID}{$mp}{$path.'_values_'.$i} .',';
+									}
+								}						
+							}
+							chop($table{$devID}{$mp.':'.$path}); # delete last komma
 						}
 					}
-					delete $devicedata{$key}{$subkey};
-				    ## for indoor-temp | outdoor-temp (in sensoryData_value), take it and shorten the key
-				} elsif ($subkey =~ m/sensoryData_value_(.*)/i) {  
-					$devicedata{$key}{$1} = $devicedata{$key}{$subkey};
-					delete $devicedata{$key}{$subkey};
-					## if datapoint demandControl -> shorten the key
-				} elsif ($subkey =~ m/demandControl.*_currentMode/i) { 
-					$devicedata{$key}{demandControl} = $devicedata{$key}{$subkey};
-					delete $devicedata{$key}{$subkey};
-				} elsif ($subkey =~ m/demandControl.*_fixed/i) { 
-					$devicedata{$key}{demandValue} = $devicedata{$key}{$subkey};
-					delete $devicedata{$key}{$subkey};
-				    ## delete consumptionData if not choosen
-				} elsif ($subkey =~ m/^energy_/i) {
-					delete $devicedata{$key}{$subkey} if (!$eopt);
+				
+				## process value-entrys
+				} elsif ($key =~ m/(.*)_value$/i ) { 
+					my $subpath = $1;
+					my $point = '';
+					## if datapoint equal actual $mode, take the value and shorten the key
+					if ($key =~ m/_value_operationModes_/i) { 
+						if ($key =~ m/_value_operationModes_($mode)_(.*)$/i) {
+							my $para = $2;
+							if ( $para =~ m/fanDirection_horizontal/i )  { $point = 'horizontal'; }
+							elsif ( $para =~ m/fanDirection_vertical/i ) { $point = 'vertical'; }
+							elsif ( $para =~ m/fanSpeed_currentMode/i )  { $point = 'fanMode'; }
+							elsif ( $para =~ m/fanSpeed_modes_fixed/i )  { $point = 'fanLevel'; }
+							elsif ( $para =~ m/setpoints_.*Temperature/i ) { $point = 'setpoint'; }	
+						}					
+					} elsif ($key =~ m/sensoryData_value_([^_]+)/i) { ## for indoor-|outdoor-temp
+						$point = $1; 
+					} elsif ($key =~ m/demandControl.*_currentMode/i) { 
+						$point = 'demandControl'; 
+					} elsif ($key =~ m/demandControl.*_fixed/i) { 
+						$point = 'demandValue'; 
+					} else { 
+						$point = $subpath;
+					}
+					## append managementpoint for multiple keys or if key already exists 
+					if (($key =~ m/(isIn|isHoliday|errorCode|firmware|iconId|modelInfo|software)/i) ||
+					(defined($dd{$devID}{$point}))) {
+						$point .= '_'.$mp;
+					}		
+					## transfer key if point if specified				
+					$dd{$devID}{$point} = $dp{$devID}{$mp}{$key} if ($point ne '');
+				
+				## calculate sums of energy consumption
+				} elsif ($key =~ m/consumptionData_value_electrical_(.*)_([m|w|d])_(\d+)$/i ) {
+					$dd{$devID}{'energy_'.$1.'_'.$2.'_'.$3.'_'.$mp} = $dp{$devID}{$mp}{$key} if ($eopt);
+					if ((looks_like_number($dp{$devID}{$mp}{$key})) && ((($3 > 12) && (($2 eq 'm') || ($2 eq 'd'))) || (($3 > 7) && ($2 eq 'w')))) {
+						if (defined($dd{$devID}{'kWh_'.$1.'_'.$period{$2}.$appendix})) {
+							$dd{$devID}{'kWh_'.$1.'_'.$period{$2}.$appendix} += $dp{$devID}{$mp}{$key};
+						} else {
+							$dd{$devID}{'kWh_'.$1.'_'.$period{$2}.$appendix} = $dp{$devID}{$mp}{$key};;
+						}
+					}
 				}
-			## leave all other entrys untouched
-			}
-		}
-		## merge $devicedata vertical and horizontal to swing
-		if (defined($devicedata{$key}{vertical}) && defined($devicedata{$key}{horizontal})) {
-			if ($devicedata{$key}{horizontal} eq "stop") {
-				$devicedata{$key}{swing} = "vertical"   if ($devicedata{$key}{vertical} eq "swing");
-				$devicedata{$key}{swing} = "stop" 	    if ($devicedata{$key}{vertical} eq "stop");
-				$devicedata{$key}{swing} = "windNice"   if ($devicedata{$key}{vertical} eq "windNice");
-			} elsif ($devicedata{$key}{horizontal} eq "swing") { 
-				$devicedata{$key}{swing} = "3dswing"    if ($devicedata{$key}{vertical} eq "swing");
-				$devicedata{$key}{swing} = "horizontal" if ($devicedata{$key}{vertical} eq "stop");
-				$devicedata{$key}{swing} = "windNice"   if ($devicedata{$key}{vertical} eq "windNice");
+				
+			} ## end of key-entry loop
+			
+		} ## end of managementpoint loop
+		
+		## at the end foreach device check merging values:
+		## merge $dd vertical and horizontal to swing
+		if (defined($dd{$devID}{vertical}) && defined($dd{$devID}{horizontal})) {
+			if ($dd{$devID}{horizontal} eq 'stop') {
+				$dd{$devID}{swing} = 'vertical'   if ($dd{$devID}{vertical} eq 'swing');
+				$dd{$devID}{swing} = 'stop' 	    if ($dd{$devID}{vertical} eq 'stop');
+				$dd{$devID}{swing} = 'windNice'   if ($dd{$devID}{vertical} eq 'windNice');
+			} elsif ($dd{$devID}{horizontal} eq 'swing') { 
+				$dd{$devID}{swing} = '3dswing'    if ($dd{$devID}{vertical} eq 'swing');
+				$dd{$devID}{swing} = 'horizontal' if ($dd{$devID}{vertical} eq 'stop');
+				$dd{$devID}{swing} = 'windNice'   if ($dd{$devID}{vertical} eq 'windNice');
 			}			
 		}
 		## merge $devicedate fanLevel and fanMode to fanSpeed
-		if (defined($devicedata{$key}{fanLevel}) && defined($devicedata{$key}{fanMode})) {
-			if ($devicedata{$key}{fanMode} eq "fixed") {
-				$devicedata{$key}{fanSpeed} = "Level".$devicedata{$key}{fanLevel};
+		if (defined($dd{$devID}{fanLevel}) && defined($dd{$devID}{fanMode})) {
+			if ($dd{$devID}{fanMode} eq 'fixed') {
+				$dd{$devID}{fanSpeed} = 'Level'.$dd{$devID}{fanLevel};
 			} else { 
-				$devicedata{$key}{fanSpeed} = $devicedata{$key}{fanMode};
+				$dd{$devID}{fanSpeed} = $dd{$devID}{fanMode};
 			}			
 		}
-		##fix v1.1.0 add state-reading
-		$devicedata{$key}{state} = $devicedata{$key}{onOffMode} if (defined($devicedata{$key}{onOffMode}));
+		## add state-reading
+		$dd{$devID}{state} = $dd{$devID}{onOffMode} if (defined($dd{$devID}{onOffMode}));
 	}
+		
 	## prepare for telnet callback
 	my $ret = $name;
-	foreach my $key (sort keys %devicedata) {
-		if (ref($devicedata{$key}) eq "HASH"){
-			$ret .= "|FHEMDEVICEID|".$key."|NAME|".$devicedata{$key}{name};
-			foreach my $subkey (sort keys %{$devicedata{$key}}) {
-				$ret .= "|".$subkey."|".$devicedata{$key}{$subkey} if (defined($devicedata{$key}{$subkey}));
+	## transfer device-readings
+	foreach my $key (sort keys %dd) {
+		if (ref($dd{$key}) eq 'HASH'){
+			$dd{$key}{name} = $dd{$key}{id} if ($dd{$key}{name} eq '');
+			$ret .= '|FHEMDEVICEID|'.$key.'|NAME|'.$dd{$key}{name};
+			foreach my $subkey (sort keys %{$dd{$key}}) {
+				$ret .= '|'.$subkey.'|'.$dd{$key}{$subkey} if (defined($dd{$key}{$subkey}));
 			}
 		}		
 	}
-	foreach my $key (sort keys %settables) {
-		if (ref($settables{$key}) eq "HASH"){
-			$ret .= "|SETTABLESDEVICEID|".$key;
-			foreach my $subkey (sort keys %{$settables{$key}}) {
-				$ret .= "|".$subkey."|".$settables{$key}{$subkey};
+	## transfer table (set-cmds)
+	foreach my $key (sort keys %table) {
+		if (ref($table{$key}) eq 'HASH'){
+			$ret .= '|SETTABLESDEVICEID|'.$key;
+			foreach my $subkey (sort keys %{$table{$key}}) {
+				$ret .= '|'.$subkey.'|'.$table{$key}{$subkey};
 			}
 		}		
 	}
@@ -935,13 +958,13 @@ sub DaikinCloud_BlockUpdate($)
 sub	DaikinCloud_DoAuthorizationRequest($)
 {
 	my ($hash) = @_;
-	return "Authorizationprocess is almost running. Please wait!" if (defined($hash->{helper}{RUNNING_CALL}));
-	$hash->{helper}{RUNNING_CALL} = BlockingCall("DaikinCloud_BlockAuth",$hash->{NAME},
-												 "DaikinCloud_BlockAuthDone",15,
-												 "DaikinCloud_BlockAuthAbort",$hash); 
+	return 'Authorizationprocess is almost running. Please wait!' if (defined($hash->{helper}{RUNNING_CALL}));
+	$hash->{helper}{RUNNING_CALL} = BlockingCall('DaikinCloud_BlockAuth',$hash->{NAME},
+												 'DaikinCloud_BlockAuthDone',15,
+												 'DaikinCloud_BlockAuthAbort',$hash); 
 	$hash->{helper}{RUNNING_CALL}->{loglevel} = 4;
 	readingsSingleUpdate($hash, 'login_status', 'starting login ...', 1 );
-	return "Authorizationprocess started. Trying to get the tokenSet.";
+	return 'Authorizationprocess started. Trying to get the tokenSet.';
 }
 
 sub DaikinCloud_BlockAuthDone($)
@@ -951,13 +974,13 @@ sub DaikinCloud_BlockAuthDone($)
 	my ($name, @values ) = split( "\\|", $string);
 	my $hash = $defs{$name};
 	if (!defined($hash->{NAME})) {
-		Log 1, "DaikinCloud (BlockAuthDone): error in device hash!";
+		Log 1, 'DaikinCloud (BlockAuthDone): error in device hash!';
 		readingsSingleUpdate($hash, 'login_status', 'error in callback hash', 1 );
 		return;
 	}
 	delete ($hash->{helper}{RUNNING_CALL});
 	if ($values[0]  =~ m/^error/i ) {
-		Log3 $hash, 2, "DaikinCloud (BlockAuthDone): ".$string;
+		Log3 $hash, 2, 'DaikinCloud (BlockAuthDone): '.$string;
 		readingsSingleUpdate($hash, 'login_status', 'error in callback', 1 );
 		return;
 	}	
@@ -986,161 +1009,161 @@ sub DaikinCloud_BlockAuthAbort($)
 { 
 	my ($hash) = @_; 
 	delete ($hash->{helper}{RUNNING_CALL});
-	Log3 $hash, 3, "DaikinCloud (BlockAuthAbort): BlockingCall aborted (timeout).";
+	Log3 $hash, 3, 'DaikinCloud (BlockAuthAbort): BlockingCall aborted (timeout).';
 	readingsSingleUpdate($hash, 'login_status', 'timeout error', 1 );
 }
 
 ## child process
 sub DaikinCloud_BlockAuth($)
 {
-	my $DAIKIN_ISSUER    = "https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_SLI9qJpc7/.well-known/openid-configuration";
-	my $DAIKIN_CLOUD_URL = "https://daikin-unicloud-prod.auth.eu-west-1.amazoncognito.com";
-	my $APIKEY           = "3_xRB3jaQ62bVjqXU1omaEsPDVYC0Twi1zfq1zHPu_5HFT0zWkDvZJS97Yw1loJnTm";
-	my $APIKEY2          = "3_QebFXhxEWDc8JhJdBWmvUd1e0AaWJCISbqe4QIHrk_KzNVJFJ4xsJ2UZbl8OIIFY";
+	my $DAIKIN_ISSUER    = 'https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_SLI9qJpc7/.well-known/openid-configuration';
+	my $DAIKIN_CLOUD_URL = 'https://daikin-unicloud-prod.auth.eu-west-1.amazoncognito.com';
+	my $APIKEY           = '3_xRB3jaQ62bVjqXU1omaEsPDVYC0Twi1zfq1zHPu_5HFT0zWkDvZJS97Yw1loJnTm';
+	my $APIKEY2          = '3_QebFXhxEWDc8JhJdBWmvUd1e0AaWJCISbqe4QIHrk_KzNVJFJ4xsJ2UZbl8OIIFY';
 	
 	my ($name) = @_;
 	my $hash = $defs{$name};
-	return $name."|error (1) in device hash!" if (!defined($hash->{NAME}));
+	return $name.'|error (1) in device hash!' if (!defined($hash->{NAME}));
 	
 	## ask issuer for the actual endpoints
-	my $param = { url => $DAIKIN_ISSUER, timeout => 5, method => "GET", ignoreredirects => 1};
+	my $param = { url => $DAIKIN_ISSUER, timeout => 5, method => 'GET', ignoreredirects => 1};
 	my ($err,$response) = HttpUtils_BlockingGet($param);
 	
-	my $auth_endpoint = "";
-	my $token_endpoint = "";
-	if (($err eq "") && ($response ne "")) {
+	my $auth_endpoint = '';
+	my $token_endpoint = '';
+	if (($err eq '') && ($response ne '')) {
 		($auth_endpoint) = ( $response =~ m/"authorization.?endpoint"\s*:\s*"([^"]+)/i );
 		($token_endpoint) = ( $response =~ m/"token.?endpoint"\s*:\s*"([^"]+)/i );
 	}
 	## if response gives no endpoints back, take the generally known endpoints
-	$auth_endpoint  = $DAIKIN_CLOUD_URL."/oauth2/authorize" if (!defined($auth_endpoint) || ($auth_endpoint eq ""));
-	$token_endpoint = $DAIKIN_CLOUD_URL."/oauth2/token" if (!defined($token_endpoint) || ($token_endpoint eq ""));
+	$auth_endpoint  = $DAIKIN_CLOUD_URL.'/oauth2/authorize' if (!defined($auth_endpoint) || ($auth_endpoint eq ''));
+	$token_endpoint = $DAIKIN_CLOUD_URL.'/oauth2/token' if (!defined($token_endpoint) || ($token_endpoint eq ''));
 	my $saml2_endpoint = $auth_endpoint;
 	$saml2_endpoint =~ s/oauth2\/authorize//i;
-	$saml2_endpoint .= "saml2/idpresponse";
+	$saml2_endpoint .= 'saml2/idpresponse';
 	
 	## create client secret
 	my @chars = ('0'..'9', 'A'..'Z','a'..'z');
 	my $len = 32;
-	my $secret = "";
+	my $secret = '';
 	while($len--){ $secret .= $chars[rand @chars] };
 	## create initial url
-	my $url = $auth_endpoint."?response_type=code&state=".$secret;
-	$url.= "&client_id=".$OPENID_CLIENT_ID."&scope=openid&redirect_uri=daikinunified%3A%2F%2Flogin";
-	$param = { url => $url, timeout => 5, method => "GET", ignoreredirects => 1};
+	my $url = $auth_endpoint.'?response_type=code&state='.$secret;
+	$url.= '&client_id='.$OPENID_CLIENT_ID.'&scope=openid&redirect_uri=daikinunified%3A%2F%2Flogin';
+	$param = { url => $url, timeout => 5, method => 'GET', ignoreredirects => 1};
 	($err,$response) = HttpUtils_BlockingGet($param);		
 	
-	return $name."|error (2) $err" if($err ne "");
-	return $name."|error (2) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 302 );
+	return $name."|error (2) $err" if($err ne '');
+	return $name.'|error (2) HTTP-Status-Code: '.$param->{code} if ($param->{code} != 302 );
 	### get crsf cookies
-	my $cookies = (join "; ", ($param->{httpheader} =~ m/((?:xsrf-token|csrf-state|csrf-state-legacy)=[^;]+)/ig))."; ";
-	return $name."|error (3) no cookies found: ".$param->{httpheader} if (!defined($cookies) || length($cookies)<50);
+	my $cookies = (join '; ', ($param->{httpheader} =~ m/((?:xsrf-token|csrf-state|csrf-state-legacy)=[^;]+)/ig)).'; ';
+	return $name.'|error (3) no cookies found: '.$param->{httpheader} if (!defined($cookies) || length($cookies)<50);
 	### get forward-url
 	($url) = ($param->{httpheader} =~ m/Location: ([^;\s]+)/i );
-	return $name."|error (4) no forward-url found: ".$param->{httpheader} if (!defined($url) || length($url)<50);
+	return $name.'|error (4) no forward-url found: '.$param->{httpheader} if (!defined($url) || length($url)<50);
 	### prepare samlContext request
-	$param = { url => $url, timeout => 5, method => "GET", ignoreredirects => 1 };
+	$param = { url => $url, timeout => 5, method => 'GET', ignoreredirects => 1 };
 	($err,$response) = HttpUtils_BlockingGet($param);
 	
-	return $name."|error (5) $err" if($err ne "");
-	return $name."|error (5) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 302 );
+	return $name."|error (5) $err" if($err ne '');
+	return $name.'|error (5) HTTP-Status-Code: '.$param->{code} if ($param->{code} != 302 );
 	### searching for samlContext
 	my ($samlContext) = ( $param->{httpheader} =~ m/samlContext=([^&]+)/i );
-	return $name."|error (6) no samlContext found: ".$param->{httpheader} if (!defined($samlContext) || length($samlContext)<50);
+	return $name.'|error (6) no samlContext found: '.$param->{httpheader} if (!defined($samlContext) || length($samlContext)<50);
 	### prepare request to get Api-Version
-	$url ="https://cdns.gigya.com/js/gigya.js?apiKey=".$APIKEY;
-	$param = { url => $url, timeout => 5, method => "GET" };
+	$url ='https://cdns.gigya.com/js/gigya.js?apiKey='.$APIKEY;
+	$param = { url => $url, timeout => 5, method => 'GET' };
 	($err,$response) = HttpUtils_BlockingGet($param);
 		
-	return $name."|error (7) $err" if($err ne "" || $response eq "");
-	return $name."|error (7) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
+	return $name."|error (7) $err" if($err ne '' || $response eq '');
+	return $name.'|error (7) HTTP-Status-Code: '.$param->{code} if ($param->{code} != 200 );
 	### searching for Api-Version
 	my ($version) = ($response =~ m/(\d+-\d-\d+)/ );
-	return $name."|error (8) no Api-Version found." if (!defined($version) || length($version)<5); 
+	return $name.'|error (8) no Api-Version found.' if (!defined($version) || length($version)<5); 
 	### prepare request to get single-sign-on cookies
-	$url = "https://cdc.daikin.eu/accounts.webSdkBootstrap?apiKey=".$APIKEY."&sdk=js_latest&format=json" ;
-	$param = { url => $url, timeout => 5, method => "GET" };
+	$url = 'https://cdc.daikin.eu/accounts.webSdkBootstrap?apiKey='.$APIKEY.'&sdk=js_latest&format=json' ;
+	$param = { url => $url, timeout => 5, method => 'GET' };
 	($err,$response) = HttpUtils_BlockingGet($param);
 	
-	return $name."|error (9) $err" if($err ne "");
-	return $name."|error (9) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
+	return $name."|error (9) $err" if($err ne '');
+	return $name.'|error (9) HTTP-Status-Code: '.$param->{code} if ($param->{code} != 200 );
 	### extrakt single-sign-on cookies
-	my $ssocookies = (join "; ", ($param->{httpheader} =~ m/((?:gmid|ucid|hasGmid)=[^;]+)/ig))."; ";
-	return $name."|error (10) no single-sign-on cookies found: ".$param->{httpheader} if (!defined($ssocookies) || length($ssocookies)<50);
-	$ssocookies .= "gig_bootstrap_" . $APIKEY . "=cdc_ver4; ";
-	$ssocookies .= "gig_canary_" . $APIKEY2 . "=false; ";
-	$ssocookies .= "gig_canary_ver_" . $APIKEY2 . "=" . $version . "; ";
-	$ssocookies .= "apiDomain_" . $APIKEY2 . "=cdc.daikin.eu; ";
+	my $ssocookies = (join '; ', ($param->{httpheader} =~ m/((?:gmid|ucid|hasGmid)=[^;]+)/ig)).'; ';
+	return $name.'|error (10) no single-sign-on cookies found: '.$param->{httpheader} if (!defined($ssocookies) || length($ssocookies)<50);
+	$ssocookies .= 'gig_bootstrap_' . $APIKEY . '=cdc_ver4; ';
+	$ssocookies .= 'gig_canary_' . $APIKEY2 . '=false; ';
+	$ssocookies .= 'gig_canary_ver_' . $APIKEY2 . '=' . $version . '; ';
+	$ssocookies .= 'apiDomain_' . $APIKEY2 . '=cdc.daikin.eu; ';
 	### prepare login to get login-token
-	my (undef, $username) = getKeyValue("DaikinCloud_username");
+	my (undef, $username) = getKeyValue('DaikinCloud_username');
 	$username = DaikinCloud_decrypt($username);
-	my (undef, $password) = getKeyValue("DaikinCloud_password");
+	my (undef, $password) = getKeyValue('DaikinCloud_password');
 	$password = DaikinCloud_decrypt($password);
-	my $header = { "content-type" => "application/x-www-form-urlencoded", "cookie" => $ssocookies }; 
-	my $body = { "loginID"  => $username, "password" => $password, "sessionExpiration" => "31536000", 
-		"targetEnv" => "jssdk","include" => "profile,", "loginMode" => "standard", 
-		"riskContext" => '{"b0":7527,"b2":4,"b5":1', "APIKey" => $APIKEY, "sdk" => "js_latest", "authMode" => "cookie", 
-		"pageURL" => "https://my.daikin.eu/content/daikinid-cdc-saml/en/login.html?samlContext=".$samlContext,
-		"sdkBuild"=> "12208", "format" => "json" 
+	my $header = { 'content-type' => 'application/x-www-form-urlencoded', 'cookie' => $ssocookies }; 
+	my $body = { 'loginID'  => $username, 'password' => $password, 'sessionExpiration' => '31536000', 
+		'targetEnv' => 'jssdk','include' => 'profile,', 'loginMode' => 'standard', 
+		'riskContext' => '{"b0":7527,"b2":4,"b5":1', 'APIKey' => $APIKEY, 'sdk' => 'js_latest', 'authMode' => 'cookie', 
+		'pageURL' => 'https://my.daikin.eu/content/daikinid-cdc-saml/en/login.html?samlContext='.$samlContext,
+		'sdkBuild'=> '12208', 'format' => 'json' 
 	};
-	$url = "https://cdc.daikin.eu/accounts.login";
-	$param = { url => $url, timeout => 5, method => "POST", header => $header, data => $body };
+	$url = 'https://cdc.daikin.eu/accounts.login';
+	$param = { url => $url, timeout => 5, method => 'POST', header => $header, data => $body };
 	($err,$response) = HttpUtils_BlockingGet($param);
 	
-	return $name."|error (11) $err" if($err ne "");
-	return $name."|error (11) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
+	return $name."|error (11) $err" if($err ne '');
+	return $name.'|error (11) HTTP-Status-Code: '.$param->{code} if ($param->{code} != 200 );
 	### extract login-token
 	my ($logintoken) = ($response =~ m/"login_token": "([^"]+)/i ); 
-	return $name."|error (12) no login-token found (wrong username or password)." if (!defined($logintoken) || length($logintoken)<10);
+	return $name.'|error (12) no login-token found (wrong username or password).' if (!defined($logintoken) || length($logintoken)<10);
 	### expand single-sign-on cookies with login-token
 	my $time = time()+ 3600000;
-	$ssocookies .= "glt_".$APIKEY."=".$logintoken."; ";
-	$ssocookies .= "gig_loginToken_".$APIKEY2."=".$logintoken."; ";
-	$ssocookies .= "gig_loginToken_".$APIKEY2."_exp=".$time."; ";
-	$ssocookies .= "gig_loginToken_".$APIKEY2."_visited=%2C".$APIKEY."; ";
+	$ssocookies .= 'glt_'.$APIKEY.'='.$logintoken.'; ';
+	$ssocookies .= 'gig_loginToken_'.$APIKEY2.'='.$logintoken.'; ';
+	$ssocookies .= 'gig_loginToken_'.$APIKEY2.'_exp='.$time.'; ';
+	$ssocookies .= 'gig_loginToken_'.$APIKEY2.'_visited=%2C'.$APIKEY.'; ';
 	### prepare SAMLResponse request
-	$header = { "cookie" => $ssocookies }; 
-	$body = { "samlContext" => $samlContext, "loginToken" => $logintoken };	
-	$url = "https://cdc.daikin.eu/saml/v2.0/".$APIKEY ."/idp/sso/continue";
-	$param = { url => $url, timeout => 5, method => "POST", header => $header, data => $body};
+	$header = { 'cookie' => $ssocookies }; 
+	$body = { 'samlContext' => $samlContext, 'loginToken' => $logintoken };	
+	$url = 'https://cdc.daikin.eu/saml/v2.0/'.$APIKEY .'/idp/sso/continue';
+	$param = { url => $url, timeout => 5, method => 'POST', header => $header, data => $body};
 	($err,$response) = HttpUtils_BlockingGet($param);
 	
-	return $name."|error (13) $err" if($err ne "");
-	return $name."|error (13) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
+	return $name."|error (13) $err" if($err ne '');
+	return $name.'|error (13) HTTP-Status-Code: '.$param->{code} if ($param->{code} != 200 );
 	### extract samlResponse and relayState
 	my ($samlResponse) = ($response =~ m/name="SAMLResponse" value="([^"]+)/i );
-	return $name."|error (14) no samlResponse found." if (!defined($samlResponse) || length($samlResponse)<10);
+	return $name.'|error (14) no samlResponse found.' if (!defined($samlResponse) || length($samlResponse)<10);
 	my ($relayState) = ($response =~ m/name="RelayState" value="([^"]+)/i );
-	return $name."|error (15) no relayState found." if (!defined($relayState) || length($relayState)<10);
+	return $name.'|error (15) no relayState found.' if (!defined($relayState) || length($relayState)<10);
 	### prepare request to get authorization code
-	$header = { "content-type" => "application/x-www-form-urlencoded", "cookie" => $cookies }; 
-	$body = { "SAMLResponse" => $samlResponse, "RelayState" => $relayState };	
+	$header = { 'content-type' => 'application/x-www-form-urlencoded', 'cookie' => $cookies }; 
+	$body = { 'SAMLResponse' => $samlResponse, 'RelayState' => $relayState };	
 	$url = $saml2_endpoint;
-	$param = { url => $url, timeout => 5, method => "POST", header => $header, data => $body, ignoreredirects => 1 };
+	$param = { url => $url, timeout => 5, method => 'POST', header => $header, data => $body, ignoreredirects => 1 };
 	($err,$response) = HttpUtils_BlockingGet($param);
 	
-	return $name."|error (16) $err" if($err ne "");
-	return $name."|error (16) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 302 );
+	return $name."|error (16) $err" if($err ne '');
+	return $name.'|error (16) HTTP-Status-Code: '.$param->{code} if ($param->{code} != 302 );
 	### extract authorization code
 	my ($code) = ($param->{httpheader} =~ m/daikinunified:\/\/login\?code=([^;]+)/i ); 
-	return $name."|error (17) no authorization code found." if (!defined($code) || length($code)<10);
+	return $name.'|error (17) no authorization code found.' if (!defined($code) || length($code)<10);
 	### prepare request to get tokenset
-	$header = { "content-type" => "application/x-www-form-urlencoded", "cookie" => $cookies }; 
-	$url  = $token_endpoint."?grant_type=authorization_code&code=".$code."&state=".$secret;
-	$url .= "&client_id=".$OPENID_CLIENT_ID."&redirect_uri=daikinunified%3A%2F%2Flogin";
-	$param =  { url => $url, header => $header, timeout => 5, method => "POST" };
+	$header = { 'content-type' => 'application/x-www-form-urlencoded', 'cookie' => $cookies }; 
+	$url  = $token_endpoint.'?grant_type=authorization_code&code='.$code.'&state='.$secret;
+	$url .= '&client_id='.$OPENID_CLIENT_ID.'&redirect_uri=daikinunified%3A%2F%2Flogin';
+	$param =  { url => $url, header => $header, timeout => 5, method => 'POST' };
 	($err,$response) = HttpUtils_BlockingGet($param);
 
-	return $name."|error (18) $err" if($err ne "");
-	return $name."|error (18) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
+	return $name."|error (18) $err" if($err ne '');
+	return $name.'|error (18) HTTP-Status-Code: '.$param->{code} if ($param->{code} != 200 );
 	## extract tokenset quick and dirty
 	my ($a_token)  = ( $response =~ m/"access.?token"\s*:\s*"([^"]+)/i );
 	my ($r_token) = ( $response =~ m/"refresh.?token"\s*:\s*"([^"]+)/i );
 	my ($exp)    = ( $response =~ m/"expires.?in"\s*:\s*"?([^",}]+)/i );
 	my ($t_type)    = ( $response =~ m/"token.?type"\s*:\s*"([^"]+)/i );
-	return $name."|error (19) no tokenset found." if (!defined($a_token) || !defined($r_token) || !defined($exp) || !defined($t_type));
+	return $name.'|error (19) no tokenset found.' if (!defined($a_token) || !defined($r_token) || !defined($exp) || !defined($t_type));
 	## return tokenset per telnet
-	return $name."|.access_token|".$a_token."|.refresh_token|".$r_token."|expires_in|".$exp."|token_type|".$t_type;	
+	return $name.'|.access_token|'.$a_token.'|.refresh_token|'.$r_token.'|expires_in|'.$exp.'|token_type|'.$t_type;	
 }
 
 ###############################################################################################
@@ -1150,16 +1173,16 @@ sub DaikinCloud_BlockAuth($)
 sub	DaikinCloud_DoRefresh($)
 {
 	my ($hash) = @_;
-	return "Authorizationprozess is almost running. Please wait!" if (defined($hash->{helper}{RUNNING_CALL}));
+	return 'Authorizationprozess is almost running. Please wait!' if (defined($hash->{helper}{RUNNING_CALL}));
 	## delete access_token to block requests of indoor units
 	delete $hash->{helper}{ACCESS_TOKEN}; 
 	## prepare subprocess
-	$hash->{helper}{RUNNING_CALL} = BlockingCall("DaikinCloud_BlockRefresh",$hash->{NAME},
-												 "DaikinCloud_BlockRefreshDone",15,
-												 "DaikinCloud_BlockRefreshAbort",$hash); 
+	$hash->{helper}{RUNNING_CALL} = BlockingCall('DaikinCloud_BlockRefresh',$hash->{NAME},
+												 'DaikinCloud_BlockRefreshDone',15,
+												 'DaikinCloud_BlockRefreshAbort',$hash); 
 	$hash->{helper}{RUNNING_CALL}->{loglevel} = 4;
 	readingsSingleUpdate($hash, 'token_status', 'starting refresh ...', 1 );
-	return "Going to refresh access-token.";
+	return 'Going to refresh access-token.';
 }
 
 sub DaikinCloud_BlockRefreshDone($)
@@ -1169,13 +1192,13 @@ sub DaikinCloud_BlockRefreshDone($)
 	my ($name, @values ) = split( "\\|", $string);
 	my $hash = $defs{$name};
 	if (!defined($hash->{NAME})) {
-		Log 1, "DaikinCloud (BlockRefreshDone): error in device hash!";
+		Log 1, 'DaikinCloud (BlockRefreshDone): error in device hash!';
 		readingsSingleUpdate($hash, 'token_status', 'error in callback hash', 1 );
 		return;
 	}
 	delete ($hash->{helper}{RUNNING_CALL});
 	if ($values[0]  =~ m/^error/i ) {
-		Log3 $hash, 2, "DaikinCloud (BlockRefreshDone): ".$string;
+		Log3 $hash, 2, 'DaikinCloud (BlockRefreshDone): '.$string;
 		readingsSingleUpdate($hash, 'token_status', 'error in callback', 1 );
 		return;
 	}
@@ -1204,7 +1227,7 @@ sub DaikinCloud_BlockRefreshAbort($)
 { 
 	my ($hash) = @_; 
 	delete ($hash->{helper}{RUNNING_CALL});
-	Log3 $hash, 3, "DaikinCloud (BlockRefreshAbort): BlockingCall aborted (timeout).";
+	Log3 $hash, 3, 'DaikinCloud (BlockRefreshAbort): BlockingCall aborted (timeout).';
 	readingsSingleUpdate($hash, 'token_status', 'timeout error', 1 );
 }
 
@@ -1212,30 +1235,30 @@ sub DaikinCloud_BlockRefresh($)
 {
 	my ($name) = @_;
 	my $hash = $defs{$name};
-	return $name."|error (1) in device hash!" if (!defined($hash) || !defined($hash->{NAME}));
+	return $name.'|error (1) in device hash!' if (!defined($hash) || !defined($hash->{NAME}));
 	my $refresh_token = $hash->{helper}{REFRESH_TOKEN};
-	return $name."|error (2) no resfresh_token found." if (!defined($refresh_token));
-	return $name."|error (3) invalid resfresh_token found: ".$refresh_token if (length($refresh_token)<10);
-	my $url    = "https://cognito-idp.eu-west-1.amazonaws.com/";
+	return $name.'|error (2) no resfresh_token found.' if (!defined($refresh_token));
+	return $name.'|error (3) invalid resfresh_token found: '.$refresh_token if (length($refresh_token)<10);
+	my $url    = 'https://cognito-idp.eu-west-1.amazonaws.com/';
     my $header = { 
-		"Content-Type"     => "application/x-amz-json-1.1",
-        "x-amz-target"     => "AWSCognitoIdentityProviderService.InitiateAuth",
-        "x-amz-user-agent" => "aws-amplify/0.1.x react-native",
-        "User-Agent"       => "Daikin/1.6.1.4681 CFNetwork/1220.1 Darwin/20.3.0",
+		'Content-Type'     => 'application/x-amz-json-1.1',
+        'x-amz-target'     => 'AWSCognitoIdentityProviderService.InitiateAuth',
+        'x-amz-user-agent' => 'aws-amplify/0.1.x react-native',
+        'User-Agent'       => 'Daikin/1.6.1.4681 CFNetwork/1220.1 Darwin/20.3.0',
     };
-    my $body = { "ClientId" => $OPENID_CLIENT_ID, "AuthFlow" => "REFRESH_TOKEN_AUTH", "AuthParameters" => {"REFRESH_TOKEN" => $refresh_token }};
+    my $body = { 'ClientId' => $OPENID_CLIENT_ID, 'AuthFlow' => 'REFRESH_TOKEN_AUTH', 'AuthParameters' => {'REFRESH_TOKEN' => $refresh_token }};
 	my $data = toJSON($body);
-    my $param = { url => $url, timeout => 5, data => $data, method => "POST", header => $header };    
+    my $param = { url => $url, timeout => 5, data => $data, method => 'POST', header => $header };    
 	my ($err,$response) = HttpUtils_BlockingGet($param);
-	return $name."|error (4) $err" if($err ne "");
-	return $name."|error (5) HTTP-Status-Code: ".$param->{code} if ($param->{code} != 200 );
+	return $name."|error (4) $err" if($err ne '');
+	return $name.'|error (5) HTTP-Status-Code: '.$param->{code} if ($param->{code} != 200 );
 	## extract tokenset quick and dirty
 	my ($a_token)  = ( $response =~ m/"access.?token"\s*:\s*"([^"]+)/i );
 	my ($exp)    = ( $response =~ m/"expires.?in"\s*:\s*"?([^",}]+)/i );
 	my ($t_type)    = ( $response =~ m/"token.?type"\s*:\s*"([^"]+)/i );
-	return $name."|error (6) no token found." if (!defined($a_token) || !defined($exp) || !defined($t_type));
+	return $name.'|error (6) no token found.' if (!defined($a_token) || !defined($exp) || !defined($t_type));
 	## return tokenset per telnet
-	return $name."|.access_token|".$a_token."|expires_in|".$exp."|token_type|".$t_type;
+	return $name.'|.access_token|'.$a_token.'|expires_in|'.$exp.'|token_type|'.$t_type;
 }
 
 ###############################################################################################
