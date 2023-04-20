@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.3.1 - 20.04.2023 fix set-cmd for "setpoints_leavingWaterOffset"
 # v1.3.0 - 18.04.2023 implement multiple managementpoint support (for Altherma)
 # v1.2.0 - 12.04.2023 implement rawDataRequest, settables only as climateControl
 # v1.1.0 - 08.04.2023 integrate kWh calculation, add state-reading, add short-commands for on|off
@@ -35,7 +36,7 @@ use HttpUtils;
 use Blocking;
 
 my $OPENID_CLIENT_ID = '7rk39602f0ds8lk0h076vvijnb';
-my $DaikinCloud_version = 'v1.3.0 - 18.04.2023';
+my $DaikinCloud_version = 'v1.3.1 - 20.04.2023';
 
 sub DaikinCloud_Initialize($)
 {
@@ -819,8 +820,10 @@ sub DaikinCloud_BlockUpdate($)
 							&& defined($dp{$devID}{$mp}{$path.'_maxValue'}) 
 							&& defined($dp{$devID}{$mp}{$path.'_stepValue'})) 
 						{							
-							if ($path =~ m/temperatureControl_value_operationModes/i) {
+							if ($path =~ m/temperatureControl_value_operationModes_.*setpoints_.*Temperature/i) {
 								$setcmd = 'setpoint';
+							} elsif ($path =~ m/temperatureControl_value_operationModes_.*setpoints_.*Offset/i) {
+								$setcmd = 'offset';
 							} elsif ($path =~ m/demandControl_value_modes_fixed/i) {
 								$setcmd = 'demandValue';
 							} elsif ($path =~ m/_fanSpeed_modes_fixed/i) {
@@ -868,6 +871,7 @@ sub DaikinCloud_BlockUpdate($)
 							elsif ( $para =~ m/fanSpeed_currentMode/i )  { $point = 'fanMode'; }
 							elsif ( $para =~ m/fanSpeed_modes_fixed/i )  { $point = 'fanLevel'; }
 							elsif ( $para =~ m/setpoints_.*Temperature/i ) { $point = 'setpoint'; }	
+							elsif ( $para =~ m/setpoints_.*Offset/i ) { $point = 'offset'; }	
 						}					
 					} elsif ($key =~ m/sensoryData_value_([^_]+)/i) { ## for indoor-|outdoor-temp
 						$point = $1; 
