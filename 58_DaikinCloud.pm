@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.3.2 - 01.05.2023 fix: after failed refresh access-token -> do new authorizationrequest
 # v1.3.1 - 20.04.2023 fix set-cmd for "setpoints_leavingWaterOffset"
 # v1.3.0 - 18.04.2023 implement multiple managementpoint support (for Altherma)
 # v1.2.0 - 12.04.2023 implement rawDataRequest, settables only as climateControl
@@ -36,7 +37,7 @@ use HttpUtils;
 use Blocking;
 
 my $OPENID_CLIENT_ID = '7rk39602f0ds8lk0h076vvijnb';
-my $DaikinCloud_version = 'v1.3.1 - 20.04.2023';
+my $DaikinCloud_version = 'v1.3.2 - 01.05.2023';
 
 sub DaikinCloud_Initialize($)
 {
@@ -997,6 +998,7 @@ sub DaikinCloud_BlockAuthDone($)
 	readingsBulkUpdate($hash, 'login_status', 'login successful');
 	readingsBulkUpdate($hash, 'token_status', 'tokenset successfully stored');		
 	readingsEndUpdate($hash,1);
+	Log3 $hash, 3, 'DaikinCloud (BlockAuthDone): tokenset successfully stored' ; ##fix v1.3.2
 	
 	## schedule UpdateRequest if polling is activated
 	my $interval = $hash->{INTERVAL};
@@ -1201,9 +1203,12 @@ sub DaikinCloud_BlockRefreshDone($)
 		return;
 	}
 	delete ($hash->{helper}{RUNNING_CALL});
+	
 	if ($values[0]  =~ m/^error/i ) {
 		Log3 $hash, 2, 'DaikinCloud (BlockRefreshDone): '.$string;
 		readingsSingleUpdate($hash, 'token_status', 'error in callback', 1 );
+		Log3 $hash, 2, 'DaikinCloud DoAuthorizationRequest to get a new tokenSet.'; ##fix v1.3.2
+		DaikinCloud_DoAuthorizationRequest($hash); ##fix v1.3.2
 		return;
 	}
 	## update readings
