@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.3.3 - 09.05.2023 fix set-cmd "offset" 
 # v1.3.2 - 01.05.2023 fix: after failed refresh access-token -> do new authorizationrequest
 # v1.3.1 - 20.04.2023 fix set-cmd for "setpoints_leavingWaterOffset"
 # v1.3.0 - 18.04.2023 implement multiple managementpoint support (for Altherma)
@@ -37,7 +38,7 @@ use HttpUtils;
 use Blocking;
 
 my $OPENID_CLIENT_ID = '7rk39602f0ds8lk0h076vvijnb';
-my $DaikinCloud_version = 'v1.3.2 - 01.05.2023';
+my $DaikinCloud_version = 'v1.3.3 - 09.05.2023';
 
 sub DaikinCloud_Initialize($)
 {
@@ -265,8 +266,8 @@ sub DaikinCloud_Set($$$$)
 		$appendix = $1 if ($cmd =~ m/^[^_]+(_.*)$/i);
 		my $mode = ReadingsVal($name, 'operationMode'.$appendix, 'unknown');
 		my $setpoint = ReadingsVal($name, 'setpoint'.$appendix, 'unknown');
-				
-		if ($cmd =~ /setpoint|demandControl|fanMode|horizontal|vertical|econoMode|streamerMode|onOffMode|powerfulMode/i) {
+		#v1.3.3 fix for set-cmd offset		
+		if ($cmd =~ /offset|setpoint|demandControl|fanMode|horizontal|vertical|econoMode|streamerMode|onOffMode|powerfulMode/i) {
 			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$mode);
 			
 		## quick command on|off for onOffMode 
@@ -441,7 +442,7 @@ sub DaikinCloud_CheckAndQueue($$$$)
 	##check value
 	my ($options) = ($table->{$datapath} =~ m/^$cmd:(.*)$/ );
 	## is it a range of possible values, then check min, max, step
-	if ($options =~ m/^slider,(\d+),(\d+\.?\d*),(\d+)/)  {
+	if ($options =~ m/^slider,(-?\d+\.?\d*),(-?\d+\.?\d*),(-?\d+\.?\d*)/)  { #v1.3.3 fix for negativ offset
 		if (($value < $1 ) || ($value > $3) || ((($3-$value) / $2) != int(($3-$value) / $2))) {
 			return "cmd: $cmd. value: $value is out of range or step (min: $1 step: $2 max: $3)! ";
 		## command and value are correct -> set them in queue
