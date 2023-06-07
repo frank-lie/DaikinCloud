@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.3.4 - 22.05.2023 fix: change/check order of set-cmd fanSpeed, fanLevel and demandValue
 # v1.3.3 - 09.05.2023 fix set-cmd "offset" 
 # v1.3.2 - 01.05.2023 fix: after failed refresh access-token -> do new authorizationrequest
 # v1.3.1 - 20.04.2023 fix set-cmd for "setpoints_leavingWaterOffset"
@@ -38,7 +39,7 @@ use HttpUtils;
 use Blocking;
 
 my $OPENID_CLIENT_ID = '7rk39602f0ds8lk0h076vvijnb';
-my $DaikinCloud_version = 'v1.3.3 - 09.05.2023';
+my $DaikinCloud_version = 'v1.3.4 - 22.05.2023';
 
 sub DaikinCloud_Initialize($)
 {
@@ -276,14 +277,14 @@ sub DaikinCloud_Set($$$$)
 			
 		## if fanLevel is set, the fanMode must be set to fixed	
 		} elsif ($cmd eq 'fanLevel' ) {
-			$err .= DaikinCloud_CheckAndQueue($hash,'fanMode','fixed',$mode);
+			$err .= DaikinCloud_CheckAndQueue($hash,'fanMode','fixed',$mode) if (ReadingsVal($name, 'fanMode', 'unknown') ne 'fixed'); #check if not fixed
 			$err .= DaikinCloud_CheckAndQueue($hash,'fanLevel',$value,$mode);
 			
 		## if fanSpeed is set, the correct mode must also be set
 		} elsif ($cmd eq 'fanSpeed' ) {
 			if ($value =~ m/Level(\d)/) {
+				$err .= DaikinCloud_CheckAndQueue($hash,'fanMode','fixed',$mode) if (ReadingsVal($name, 'fanMode', 'unknown') ne 'fixed'); #check if not fixed
 				$err .= DaikinCloud_CheckAndQueue($hash,'fanLevel',$1,$mode);
-				$err .= DaikinCloud_CheckAndQueue($hash,'fanMode','fixed',$mode);
 			} else {
 				$err .= DaikinCloud_CheckAndQueue($hash,'fanMode',$value,$mode);
 			}
@@ -309,9 +310,8 @@ sub DaikinCloud_Set($$$$)
 			readingsSingleUpdate($hash, $cmd, $value, 1 ) if ($err eq '');
 		## if demandValue is set, the demandControl must be set to fixed	
 		} elsif ($cmd =~ m/demandValue/i ) {
+			$err .= DaikinCloud_CheckAndQueue($hash,'demandControl','fixed',$mode) if (ReadingsVal($name, 'demandControl', 'unknown') ne 'fixed');  #check if not fixed
 			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$mode);
-			$err .= DaikinCloud_CheckAndQueue($hash,'demandControl','fixed',$mode);
-			
 		## if operationMode ist changed, setpoint, fanLevel, fanMode and possible fanDirections has to be set
 		} elsif ($cmd =~ m/operationMode/i ){
 			if (($value ne 'dry') && ($value ne 'fanOnly')){
