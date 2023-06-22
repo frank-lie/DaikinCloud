@@ -10,6 +10,7 @@
 # The connections to the cloud and the complex parse of the data are non-blocking.
 #
 #######################################################################################################
+# v1.3.6 - 20.06.2023 fix: do not process other IDs (e.g. firmware update IDs)
 # v1.3.5 - 02.06.2023 improve set-cmd (suspend polling), unified error logs, second try on failed connection, commandref
 # v1.3.4 - 22.05.2023 fix: change/check order of set-cmd fanSpeed, fanLevel and demandValue
 # v1.3.3 - 09.05.2023 fix set-cmd "offset" 
@@ -40,7 +41,7 @@ use HttpUtils;
 use Blocking;
 
 my $OPENID_CLIENT_ID = '7rk39602f0ds8lk0h076vvijnb';
-my $DaikinCloud_version = 'v1.3.5 - 02.06.2023';
+my $DaikinCloud_version = 'v1.3.6 - 20.06.2023';
 
 sub DaikinCloud_Initialize($)
 {
@@ -779,7 +780,7 @@ sub DaikinCloud_BlockUpdate($)
 	
 	## get device-ids and embedded-ids
 	foreach my $key (sort keys %{$raw}) {
-		if ($key =~ m/_id$/i ) {
+		if ($key =~ m/__id$/i ) { # v1.3.6 fix: only process device-IDs beginning with "_"
 			my ($nr) = ($key =~ m/^_(\d+)_/i );
 			$dev_id{$nr} = $raw->{$key} if (defined($nr));
 		} elsif ($key =~ m/embeddedId$/i ) {
