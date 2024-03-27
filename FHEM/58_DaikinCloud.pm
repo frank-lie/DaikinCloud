@@ -8,7 +8,7 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
-# v2.1.4 - 17.03.2024 only store refresh-token in setKeyValue (better performance)
+# v2.1.4 - 27.03.2024 only store refresh-token in setKeyValue (better performance)
 # v2.1.3 - 17.03.2024 fix: Retry-After without reading, better conversion to new API
 # v2.1.2 - 10.03.2024 only updataRequest and set-cmd, if there is no request limit reached
 # v2.1.1 - 09.03.2024 saveRawData as attribut, use setKeyValue to sava TokenSet
@@ -50,7 +50,7 @@ use HttpUtils;
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.4 - 17.03.2024';
+my $DaikinCloud_version = 'v2.1.4 - 27.03.2024';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
