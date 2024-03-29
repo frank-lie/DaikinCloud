@@ -8,7 +8,8 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
-# v2.1.4 - 27.03.2024 only store refresh-token in setKeyValue (better performance)
+# v2.1.5 - 29.03.2024 fix error by JSON::XS (boolean_values)
+# v2.1.4 - 17.03.2024 only store refresh-token in setKeyValue (better performance)
 # v2.1.3 - 17.03.2024 fix: Retry-After without reading, better conversion to new API
 # v2.1.2 - 10.03.2024 only updataRequest and set-cmd, if there is no request limit reached
 # v2.1.1 - 09.03.2024 saveRawData as attribut, use setKeyValue to sava TokenSet
@@ -50,7 +51,7 @@ use HttpUtils;
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.4 - 27.03.2024';
+my $DaikinCloud_version = 'v2.1.5 - 29.03.2024';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
@@ -1088,14 +1089,16 @@ sub DaikinCloud_CallbackUpdateRequest
 	
 	my $time1 = time();
 	my $cdda;
+	## fix prepare data (true, false and null as string) 
+	$data =~ s/"\s*:\s*true/":"true"/g; 
+	$data =~ s/"\s*:\s*false/":"false"/g;
+	$data =~ s/([,:\[])\s*(null)/$1"$2"/g;
 	
 	## transform json to perl object -> use JSON::XS (=fastest), otherwise use an own awesome method
 	if ($json_xs_available) {
-		$cdda = JSON::XS->new->boolean_values("false","true")->decode($data);
-	} else {
-		$data =~ s/"\s*:\s*true/":"true"/g; 
-		$data =~ s/"\s*:\s*false/":"false"/g;
-		$data =~ s/([,:\[])\s*(null)/$1"$2"/g;
+		# $cdda = JSON::XS->new->boolean_values("false","true")->decode($data);
+		$cdda = decode_json($data);
+	} else {		
 		$data =~ s/":/"=>/g;
 		($cdda) = eval $data ;
 	}
