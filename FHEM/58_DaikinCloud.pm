@@ -8,36 +8,19 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
+# v2.1.8 - 15.06.2024 individual credentials, doku
+# v2.1.7 - 09.04.2024 code cleanup/optimize
+# v2.1.6 - 29.03.2024 better workaround for fix error JSON::XS (boolean_values)
 # v2.1.5 - 29.03.2024 fix error by JSON::XS (boolean_values)
 # v2.1.4 - 17.03.2024 only store refresh-token in setKeyValue (better performance)
 # v2.1.3 - 17.03.2024 fix: Retry-After without reading, better conversion to new API
 # v2.1.2 - 10.03.2024 only updataRequest and set-cmd, if there is no request limit reached
-# v2.1.1 - 09.03.2024 saveRawData as attribut, use setKeyValue to sava TokenSet
+# v2.1.1 - 09.03.2024 saveRawData as attribut, use setKeyValue to save TokenSet
 # v2.1.0 - 08.03.2024 new data-evaluation-routine
 # v2.0.2 - 02.03.2024 evaluate HTTP-Response-Header to check remaining requests
 # v2.0.1 - 28.02.2024 Define Standard redirect-uri to: https://my.home-assistant.io/redirect/oauth
 # v2.0.0 - 21.02.2024 New Open Daikin-API
-# v1.3.6 - 20.06.2023 fix: do not process other IDs (e.g. firmware update IDs)
-# v1.3.5 - 02.06.2023 improve set-cmd (suspend polling), unified error logs, second try on failed connection, commandref
-# v1.3.4 - 22.05.2023 fix: change/check order of set-cmd fanSpeed, fanLevel and demandValue
-# v1.3.3 - 09.05.2023 fix set-cmd "offset" 
-# v1.3.2 - 01.05.2023 fix: after failed refresh access-token -> do new authorizationrequest
-# v1.3.1 - 20.04.2023 fix set-cmd for "setpoints_leavingWaterOffset"
-# v1.3.0 - 18.04.2023 implement multiple managementpoint support (for Altherma)
-# v1.2.0 - 12.04.2023 implement rawDataRequest, settables only as climateControl
-# v1.1.0 - 08.04.2023 integrate kWh calculation, add state-reading, add short-commands for on|off
-# v1.0.4 - 07.04.2023 check isCloudConnectionUp before sent commands
-# v1.0.3 - 07.04.2023 shorten error logs (remove repeated message-content)
-# v1.0.2 - 06.04.2023 fix feedback error on incorrect set commands
-# v1.0.1 - 24.03.2023 separate the attributes for master/indoor units devices
-# v1.0.0 - 22.03.2023 finale release
-# v0.4.0 - 18.03.2023 validationcheck for set commands
-# v0.3.0 - 18.03.2023 switch to non-blocking functions
-# v0.2.0 - 15.03.2023 create seperat settables, setlists for every indoor unit
-# v0.1.0 - 08.03.2023 create authorizationrequest, refresh access-token, update-data process
 #######################################################################################################
-
-## doku kontrollieren
 
 package main;
 
@@ -47,17 +30,15 @@ use warnings;
 use Time::HiRes qw(gettimeofday time);
 use HttpUtils;
 
-## try to use json::xs, otherwise use own decoding sub
+## try to use JSON::XS, otherwise use own decoding sub
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.5 - 29.03.2024';
+my $DaikinCloud_version = 'v2.1.8 - 15.06.2024';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
-my $daikin_dev_url = 	"https://developer.cloud.daikineurope.com/login";
 
-#######################################################################################################
 ###################################### Forward declarations ###########################################
 
 sub DaikinCloud_Initialize($);			# define the functions to be called 
@@ -148,8 +129,8 @@ sub DaikinCloud_Define($$)
 			# $hash->{REDIRECT_URI} = defined($a[4]) ? $a[4] : 'https://oskar.pw/';
 			$hash->{REDIRECT_URI} = defined($a[4]) ? $a[4] : 'https://my.home-assistant.io/redirect/oauth';
 		} else { ## if no parameters are given use the standard credentials
-			$hash->{CLIENT_ID} = 'emU20GdJDiiUxI_HnFGz69dD';
-			$hash->{CLIENT_SECRET} = 'TNL1ePwnOkf6o2gKiI8InS8nVwTz2G__VYkv6WznzJGUnwLHLTmKYp-7RZc6FA3yS6D0Wgj_snvqsU5H_LPHQA';
+			$hash->{CLIENT_ID} = 'eMe1bH5NZ970D-wfj_SkaUlE';
+			$hash->{CLIENT_SECRET} = 'hH8bXxNZ1kwl4MNUWMKPh33f8VJOFj9pbqn7w6cRw1gnZ065n5jdibZ1LxQjrPHPFCxdlD5zXHpZUs-mi2eZ9g';
 			$hash->{REDIRECT_URI} = 'https://my.home-assistant.io/redirect/oauth';
 			$hash->{DEF} = $hash->{CLIENT_ID}.' '.$hash->{CLIENT_SECRET}.' '.$hash->{REDIRECT_URI}
 		}
@@ -170,8 +151,8 @@ sub DaikinCloud_Define($$)
 			## delete tokens for old API
 			delete $hash->{helper}{ACCESS_TOKEN} if (defined($hash->{helper}) && defined($hash->{helper}{ACCESS_TOKEN}));
 			delete $hash->{helper}{REFRESH_TOKEN} if (defined($hash->{helper}) && defined($hash->{helper}{REFRESH_TOKEN}));
-			CommandDeleteReading(undef,'-q $hash->{NAME} .refresh_token') if (!defined(ReadingsVal($hash->{NAME},'.refresh_token',undef)));
-			CommandDeleteReading(undef,'-q $hash->{NAME} .access_token') if (!defined(ReadingsVal($hash->{NAME},'.access_token',undef)));
+			CommandDeleteReading(undef,'-q $hash->{NAME} .refresh_token') if (defined(ReadingsVal($hash->{NAME},'.refresh_token',undef)));
+			CommandDeleteReading(undef,'-q $hash->{NAME} .access_token') if (defined(ReadingsVal($hash->{NAME},'.access_token',undef)));
 			setKeyValue('DaikinCloud_username',undef); 
 			setKeyValue('DaikinCloud_password',undef);			
 		}
@@ -304,7 +285,6 @@ sub DaikinCloud_GetToken($)
 			state => $secret_state
 		}
 	});
-	CommandDeleteReading(undef,'-q $hash->{NAME} login_status') if (!defined(ReadingsVal($hash->{NAME},'login_status',undef)));
 	readingsSingleUpdate($hash, 'token_status', 'request for TokenSet ..', 1 );
 	return;
 }
@@ -898,7 +878,6 @@ sub DaikinCloud_UpdateRequest(;$)
 	
 	if (!defined($hash->{CLIENT_ID}) || !defined($hash->{CLIENT_SECRET})) {
 		readingsBeginUpdate($hash);
-		readingsBulkUpdate($hash, 'login_status', 'OAuth2-Login required!');
 		readingsBulkUpdate($hash, 'token_type', 'OAuth2-Login required!');
 		readingsBulkUpdate($hash, 'token_status', 'OAuth2-Login required!');
 		readingsEndUpdate($hash,1);
@@ -1013,8 +992,7 @@ sub DaikinCloud_GetDetailData($$$$$$$)
 			$append .= '_'.$mp if ($mp !~ m/climateControl/i);
 			for (my $i = 0; $i < @{$data->{$skey}}; $i++) {
 				## if value is a number -> summarize
-				if (defined($data->{$skey}[$i]) && $data->{$skey}[$i] =~ m/^[\d]+\.?[\d]*$/ 
-					&& (($i > 6 && $skey eq "w") || $i > 11 )) {
+				if (( $i > 11 || ($i > 6 && $skey eq "w")) && defined($data->{$skey}[$i]) && $data->{$skey}[$i] =~ m/^[\d]+\.?[\d]*$/ ) {
 					$sum += $data->{$skey}[$i] ;
 				}
 				readingsBulkUpdate($defptr, 'energy_'.$key.'_'.$skey.'_'.($i+1).$append, $data->{$skey}[$i]) if ($eopt == 2);
@@ -1089,16 +1067,19 @@ sub DaikinCloud_CallbackUpdateRequest
 	
 	my $time1 = time();
 	my $cdda;
-	## fix prepare data (true, false and null as string) 
-	$data =~ s/"\s*:\s*true/":"true"/g; 
-	$data =~ s/"\s*:\s*false/":"false"/g;
-	$data =~ s/([,:\[])\s*(null)/$1"$2"/g;
 	
 	## transform json to perl object -> use JSON::XS (=fastest), otherwise use an own awesome method
 	if ($json_xs_available) {
-		# $cdda = JSON::XS->new->boolean_values("false","true")->decode($data);
-		$cdda = decode_json($data);
-	} else {		
+		$cdda = eval { JSON::XS->new->boolean_values("false","true")->decode($data) };
+		if ($@) {
+			Log3 $hash, 2, 'Error using JSON::XS. To use the faster JSON::XS you have to update to the latest version. Try: "sudo apt-get install -y libjson-xs-perl" in the linux shell. Currently an alternative method will be used.';
+			$json_xs_available = 0;
+		};
+	}
+	if (!$json_xs_available) {
+		$data =~ s/"\s*:\s*true/":"true"/g; 
+		$data =~ s/"\s*:\s*false/":"false"/g;
+		$data =~ s/([,:\[])\s*(null)/$1"$2"/g;		
 		$data =~ s/":/"=>/g;
 		($cdda) = eval $data ;
 	}
@@ -1146,28 +1127,26 @@ sub DaikinCloud_CallbackUpdateRequest
 						}
 					} 
 					DaikinCloud_GetDeviceData($defptr,$cdda->[$nr],$eopt);
-					readingsEndUpdate($defptr,1);
 					## merge vertical and horizontal to swing
 					my $ver = ReadingsVal($defptr->{NAME}, 'vertical', undef);
 					my $hor = ReadingsVal($defptr->{NAME}, 'horizontal', undef);
-					
 					if (defined($ver) && defined($hor)) {
 						my $swing = 'unknown';
 						if ($ver eq 'windNice') { $swing = 'windNice' }
 						elsif ($ver eq 'stop')  { $swing = ($hor eq 'swing') ? 'horizontal': 'stop' }
 						elsif ($ver eq 'swing') { $swing = ($hor eq 'swing') ? '3dswing': 'vertical' }
-						readingsSingleUpdate($defptr, 'swing', $swing, 1 );
+						readingsBulkUpdate($defptr, 'swing', $swing);
 					}
 					## merge fanLevel and fanMode to fanSpeed
 					my $fanLevel = ReadingsVal($defptr->{NAME}, 'fanLevel', undef);
 					my $fanMode = ReadingsVal($defptr->{NAME}, 'fanMode', undef);
 					if (defined($fanLevel) && defined($fanMode)) {
-						readingsSingleUpdate($defptr,'fanSpeed',($fanMode eq 'fixed')?'Level'.$fanLevel:$fanMode,1);
+						readingsBulkUpdate($defptr,'fanSpeed',($fanMode eq 'fixed')?'Level'.$fanLevel:$fanMode);
 					}
 					## add state to indoor device (=onOffMode if available)
-					my $state = ReadingsVal($defptr->{NAME},'onOffMode',undef);
-					readingsSingleUpdate($defptr,'state',$state,1) if (defined($state));
-					
+					my $state = ReadingsVal($defptr->{NAME},'onOffMode', undef);
+					readingsBulkUpdate($defptr,'state',$state) if (defined($state));
+					readingsEndUpdate($defptr,1);					
 				}
 			Log3 $hash, 5, 'DaikinCloud (CallbackUpdateRequest): Device-Data '.$dev_name. ' parsed.';	
 			} ## end of each single device evaluation
@@ -1208,21 +1187,53 @@ sub DaikinCloud_CallbackUpdateRequest
   <ul>
     <ul>
       <br>
-      First a master device has to be defined to handle the access to the 
-      cloud:<br>
-      <br>
+	  First a master device has to be defined to handle the access to the 
+      cloud. For this purpose there are two options:<br><br>
+	  <b><u>1. Individual definition of the master device</u></b><br><br>
       <code>define &lt;NAME&gt; DaikinCloud &lt;CLIENT_ID&gt; 
 	  &lt;CLIENT_SECRET&gt; &lt;REDIRECT_URI&gt;</code><br>
       <br>
       Go to the <a href="https://developer.cloud.daikineurope.com/login" 
-	  target="_blank">Daikin Developer Portal</a> to get a CLIENT_ID, 
-	  a CLIENT_SECRET and save your own REDIRECT_URI 
-	  (https://&lt;IP of your FHEM-Server&gt;:8083/fhem?cmd.Test=set%20DaikinCloud%20AuthCode%20).
+	  target="_blank">Daikin Developer Portal</a> to create your own APP with
+	  an individual CLIENT_ID and CLIENT_SECRET and create your own REDIRECT_URI 
+	  (https://&lt;IP FHEM&gt;:8083/fhem?cmd.Test=set%20DaikinMaster%20AuthCode%20).
+	  It is important to correctly define the REDIRECT_URI. This REDIRECT_URI must 
+	  contain the host that you set yourself in the browser for access FHEM, usually 
+	  the IP address of the FHEM server. This is intended to send the authorization 
+	  code as a command via FHEMWEB API be transferred to the defined master device 
+	  (here e.g. DaikinMaster). Just as the REDIRECT_URI has been defined in the 
+	  Daikin Developer Portal, it must also be specified in the device definition in 
+	  FHEM. When using the csrfToken in FHEM, a static token must be used and 
+	  appended to the REDIRECT_URI (&fwcsrf=myToken123). Here too, the REDIRECT_URI 
+	  in the Daikin Developer Portal must be 100% identical to the information in the 
+	  device definition in FHEM!
 	  <br><br>
-	  After creating the master device it is required to do a Daikin-Cloud-Login (OAuth2).
-	  The individual link is provided by the Internals of the master device 
-	  (Internal AUTHORIZATION_LINK). After successful login a access-token and a refresh-token
-	  is stored in FHEM.<br><br>
+	  After the master device has been created, a Daikin cloud login (OAuth2) is 
+	  required. The individual link is stored in the internals (Internal 
+	  AUTHORIZATION_LINK). After a successful login, the access token and the 
+	  refresh token are automatically saved in FHEM.
+	  <br><br>
+	  Since the individual definition is more complex and presents various pitfalls, 
+	  especially when using security functions such as csrfToken or access 
+	  restrictions in FHEM, the following workaround is also available:
+	  <br><br>
+	  <b><u>2. Definition of the master device via standard parameters</u></b><br><br>
+	  Alternatively, the master device can also be defined with general standard 
+	  settings:<br><br>
+	  <code>define &lt;NAME&gt; DaikinCloud</code><br>
+      <br>
+	  In this case https://my.home-assistant.io/redirect/oauth is used as the 
+	  REDIRECT_URI. The Daikin Cloud Login (OAuth2) is also accessed via the Internal 
+	  AUTHORIZATION_LINK. After you have agreed to the terms of use and allowed the 
+	  release of the data, you will be redirected to the REDIRECT_URI. Before you 
+	  click away an error message like "Invalid parameters given", the complete link 
+	  to the website must be copied from the browser 
+	  (https://my.home-assistant.io/redirect/oauth/?code=xxxxxxxxxxxx) to the clipboard 
+	  and stored in FHEM can be entered as set-command:<br><br>
+	  <code>set DaikinMaster AuthCode &lt;complete link of return URL&gt;
+	  </code><br><br>
+	  This completes the setup of the master device.<br><br>
+	  <b><u>Definition of indoor units</u></b><br><br>	  
       Thereafter for each indoor unit one device has to be defined. It is 
       easiest to let the devices be autocreated (see attributes). Otherwise 
       they can also be created manually if the device-id is known:<br><br>
@@ -1246,7 +1257,9 @@ sub DaikinCloud_CallbackUpdateRequest
         To revoke the access-token and the refresh-token you can logout.
       </li><br>
     </ul>
-    The further possible set commands depend on the respective indoor units.<br>
+    The following set commands depend on the capabilities of the respective 
+	indoor units. Not all commands are supported in Daikin's new API. Therefore, 
+	only the possible and permitted commands are always displayed!<br>
     <br>
     <ul>
       <a id="DaikinCloud-set-demandControl"></a>
@@ -1396,7 +1409,7 @@ sub DaikinCloud_CallbackUpdateRequest
 <a id="DaikinCloud"></a>
 <h3>DaikinCloud</h3>
 <ul>
-  Dieses Modul kann die Innenger&auml;te von Daikin-Klimaanlagen steuern, 
+  Dieses Modul kann Daikin-Klimaanlagen und Daikin-W&auml;rmepumpen steuern, 
   welche mit der Daikin-Cloud (EU) verbunden sind. Die Ger&auml;te m&uuml;ssen
   zun&auml;chst &uuml;ber die Daikin <b>ONECTA-App</b> zur Cloud 
   hinzugef&uuml;gt werden. Sobald sie in der Cloud hinzugef&uuml;gt wurden, 
@@ -1406,24 +1419,57 @@ sub DaikinCloud_CallbackUpdateRequest
   <ul>
     <ul>
       <br>
-      Zuerst muss ein Master-Ger&auml;t (bzw. eine Bridge) definiert werden, 
-      welches den Zugriff auf die Cloud erm&ouml;glicht:<br>
-      <br>
+      Zuerst muss ein Master-Device (bzw. eine Bridge) definiert werden, 
+      welches den Zugriff auf die Cloud erm&ouml;glicht. Hierf&uuml; gibt es
+	  zwei M&ouml;glichkeiten:<br><br>
+	  <b><u>1. Individuelle Definition des Master-Devices</u></b><br><br>
       <code>define &lt;NAME&gt; DaikinCloud &lt;CLIENT_ID&gt; 
 	  &lt;CLIENT_SECRET&gt; &lt;REDIRECT_URI&gt;</code><br>
       <br>
       Gehe auf das <a href="https://developer.cloud.daikineurope.com/login" 
-	  target="_blank">Daikin Developer Portal</a>, um eine CLIENT_ID, 
-	  ein CLIENT_SECRET zu bekommen und deine eigene REDIRECT_URI 
-	  (https://&lt;IP of your FHEM-Server&gt;:8083/fhem?cmd.Test=set%20DaikinCloud%20AuthCode%20)
-	  dort zu speichern.
+	  target="_blank">Daikin Developer Portal</a>, um eine eigene APP mit 
+	  einer individuellen CLIENT_ID und CLIENT_SECRET zu erstellen und deine eigene 
+	  REDIRECT_URI (https://&lt;IP FHEM&gt;:8083/fhem?cmd.Test=set%20DaikinMaster%20AuthCode%20)
+	  zu definieren. Wichtig ist die zutreffende Definition der REDIRECT_URI. 
+	  Diese REDIRECT_URI muss den Host enthalten, den man selbst im Browser für den 
+	  Zugriff auf FHEM verwendet, also in der Regel die IP-Adresse des FHEM-Servers. 
+	  Damit soll &uuml;ber die WEB-API von FHEM der Authorisierungscode als Kommando 
+	  in das definierte Master-Device (hier z.B. DaikinMaster) &uuml;bergeben werden. 
+	  So wie die REDIRECT_URI im Daikin Developer Portal definiert worden ist, muss
+	  sie auch in der Ger&auml;tedefinition in FHEM angegeben werden. Bei Benutzung 
+	  des csrfToken in FHEM, muss ein statisches Token verwendet werden und dieses
+	  an die REDIRECT_URI angehangen werden (&fwcsrf=myToken123). Auch hier gilt, 
+	  dass die REDIRECT_URI im Daikin Developer Portal zu 100% <b>identisch</b> sein 
+	  muss mit der Angabe in der Ger&auml;tedefinition in FHEM!
 	  <br><br>
-	  Nachdem das  Master-Ger&auml;t angelegt worden ist, ist ein Daikin-Cloud-Login (OAuth2)
+	  Nachdem das Master-Device angelegt worden ist, ist ein Daikin-Cloud-Login (OAuth2)
 	  erforderlich. Der individuelle Link ist in den Internals gespeichert 
 	  (Internal AUTHORIZATION_LINK). Nach einem erfolgreichen Login werden der 
-	  access-token und der refresh-token in FHEM gespeichert.
-      <br><br>
-      Danach muss f&uuml;r jedes Innenger&auml;t ein Device definiert werden. 
+	  access-token und der refresh-token in FHEM automatisch gespeichert.
+	  <br><br>
+	  Da die individuelle Definition aufw&auml;ndiger und insbesondere bei Verwendung 
+	  von Sicherheitsfunktion wie csrfToken oder Zugriffsbeschr&auml;nkungen in FHEM 
+	  verschiedene Fallstricke bereit h&auml;lt, steht auch folgende Umgehungsl&ouml;sung
+	  bereit:
+	  <br><br>
+	  <b><u>2. Definition des Master-Devices &uuml;ber Standardparameter</u></b><br><br>
+	  Alternativ kann das Master-Device auch mit allgemeinen Standard-Einstellungen 
+	  definiert werden:<br><br>
+	  <code>define &lt;NAME&gt; DaikinCloud</code><br>
+      <br>
+	  Als REDIRECT_URI wird in diesem Fall https://my.home-assistant.io/redirect/oauth
+	  mitbenutzt. Der Aufruf des Daikin-Cloud-Login (OAuth2) erfolgt ebenfalls &uuml;ber
+	  das Internal AUTHORIZATION_LINK. Nachdem ihr den Nutzungsbedingungen zugestimmt 
+	  und die Freigabe der Daten erlaubt habt, werdet ihr auf die REDIRECT_URI 
+	  weitergeleitet. Bevor ihr eine Fehlermeldung wie "Invalid paramaters given" 
+	  wegklickt, muss der komplette Link der Internetseite aus dem Browser 
+	  (https://my.home-assistant.io/redirect/oauth/?code=xxxxxxxxxxxx) in die 
+	  Zwischenablage kopiert und in FHEM als set-command eingegeben werden:<br><br>
+	  <code>set DaikinMaster AuthCode &lt;kompletter Link der R&uuml;ckgabe-URL&gt;
+	  </code><br><br>
+	  Damit ist die Einrichtung des Master-Device abgeschlossen.<br><br>
+	  <b><u>Definition der Innenger&auml;te</u></b><br><br>	  
+      Danach ist f&uuml;r jedes Innenger&auml;t ein Device zu definieren. 
       Es ist am einfachsten, die Devices automatisch erstellen zu lassen 
       (siehe Attribute). Ansonsten k&ouml;nnen sie auch manuell erstellt 
       werden, wenn die Device-ID bereits bekannt ist:<br><br>
@@ -1449,8 +1495,10 @@ sub DaikinCloud_CallbackUpdateRequest
 		und ung&uuml;ltig gesetzt.
       </li><br>
     </ul>
-    Die folgenden Set-Befehle h&auml;ngen von den m&ouml;glichkeiten der 
-    jeweiligen Innenger&auml;te ab.<br>
+    Die folgenden Set-Befehle h&auml;ngen von den M&ouml;glichkeiten der 
+    jeweiligen Innenger&auml;te ab. In der neuen API von Daikin werden 
+	nicht mehr alle Befehle unterst&uuml;tzt. Es werden daher immer nur die
+	m&ouml;glichen und zul&auml;ssigen Befehle angezeigt!<br>
     <br>
     <ul>
       <a id="DaikinCloud-set-demandControl"></a>
