@@ -8,6 +8,7 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
+# v2.1.9 - 19.06.2024 back to test credentials (rate-limit seems to be per app!)
 # v2.1.8 - 15.06.2024 individual credentials, doku
 # v2.1.7 - 09.04.2024 code cleanup/optimize
 # v2.1.6 - 29.03.2024 better workaround for fix error JSON::XS (boolean_values)
@@ -34,7 +35,7 @@ use HttpUtils;
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.8 - 15.06.2024';
+my $DaikinCloud_version = 'v2.1.9 - 19.06.2024';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
@@ -129,8 +130,8 @@ sub DaikinCloud_Define($$)
 			# $hash->{REDIRECT_URI} = defined($a[4]) ? $a[4] : 'https://oskar.pw/';
 			$hash->{REDIRECT_URI} = defined($a[4]) ? $a[4] : 'https://my.home-assistant.io/redirect/oauth';
 		} else { ## if no parameters are given use the standard credentials
-			$hash->{CLIENT_ID} = 'eMe1bH5NZ970D-wfj_SkaUlE';
-			$hash->{CLIENT_SECRET} = 'hH8bXxNZ1kwl4MNUWMKPh33f8VJOFj9pbqn7w6cRw1gnZ065n5jdibZ1LxQjrPHPFCxdlD5zXHpZUs-mi2eZ9g';
+			$hash->{CLIENT_ID} = 'emU20GdJDiiUxI_HnFGz69dD';
+			$hash->{CLIENT_SECRET} = 'TNL1ePwnOkf6o2gKiI8InS8nVwTz2G__VYkv6WznzJGUnwLHLTmKYp-7RZc6FA3yS6D0Wgj_snvqsU5H_LPHQA';
 			$hash->{REDIRECT_URI} = 'https://my.home-assistant.io/redirect/oauth';
 			$hash->{DEF} = $hash->{CLIENT_ID}.' '.$hash->{CLIENT_SECRET}.' '.$hash->{REDIRECT_URI}
 		}
