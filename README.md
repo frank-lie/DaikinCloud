@@ -19,7 +19,7 @@ Im Daikin Developer Portal legst du wie folgt eine neue APP an: Rechts oben bei 
 
 Es besteht auch die Möglichkeiten, eine individuelle `REDIRECT_URI` für FHEM zu definieren. Diese muss nach folgendem Schema erstellt/definiert werden: `https://<IP-FHEM-Server>:8083/fhem?cmd=set%20<Master-Device-Name>%20AuthCode%20`. Hierbei ist zu beachten, dass nur sichere Verbindungen (also https) als REDIRECT_URI akzeptiert werden. IP-FHEM-Server und Master-Device-Name sind durch die entsprechende IP und Device-Namen zu ersetzen. Ferner ist zu beachten, dass bei Nutzung des csrfToken in FHEM (Standard ab FHEM-Version 5.8) noch ein `&fwcsrf=<dein CSRF-Token>` angehangen wird (zu ersetzen durch den jeweiligen CSRF-Token -> vgl. INTERNAL CSRFTOKEN im Device FHEMWEB). Da die individuelle Konfiguration der `REDIRECT_URI` mit vielen Fallstricken verbunden ist, kann ich jedem Einsteiger nur empfehlen stattdessen `https://my.home-assistant.io/redirect/oauth` als `REDIRECT_URI` zu verwenden.
 
-Im Anschluss werden dir die CLIENT_ID und (einmal!) das CLIENT_SECRET angezeigt. Kopiere und speichere dir diese beiden Werte. Achtung insbesondere darauf, das CLIENT_SECRET zu speichern, da es nur dieses eine Mal angezeigt wird!
+Im Anschluss werden dir die CLIENT_ID und (einmal!) das CLIENT_SECRET angezeigt. Kopiere und speichere dir diese beiden Werte. Achte insbesondere darauf, das CLIENT_SECRET zu speichern, da es nur dieses eine Mal angezeigt wird!
 
 
 ## Installation und Verwendung 
