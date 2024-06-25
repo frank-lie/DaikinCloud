@@ -8,6 +8,7 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
+# v2.1.10- 25.06.2024 modify device: keep attributes, hint for test-credentials, update doku
 # v2.1.9 - 19.06.2024 back to test credentials (rate-limit seems to be per app!)
 # v2.1.8 - 15.06.2024 individual credentials, doku
 # v2.1.7 - 09.04.2024 code cleanup/optimize
@@ -35,7 +36,7 @@ use HttpUtils;
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.9 - 19.06.2024';
+my $DaikinCloud_version = 'v2.1.10 - 25.06.2024';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
@@ -97,7 +98,7 @@ sub DaikinCloud_Define($$)
 	my @a = split("[ \t][ \t]*", $def);
 	
 	if (int(@a) > 2 && $a[2] eq "?" ) {
-		return "Syntax: define <NAME> DaikinCloud [<CLIENT_ID>] [<CLIENT_SECRET>] [<REDIRECT_URI>]"; 
+		return "Syntax: define <NAME> DaikinCloud <CLIENT_ID> <CLIENT_SECRET> <REDIRECT_URI>"; 
 	};
 	
 	my $name = $a[0]; # a[0]=name; a[1]=DaikinCloud; a[2]..a[4]= parameters
@@ -110,11 +111,11 @@ sub DaikinCloud_Define($$)
 		$modules{DaikinCloud}{defptr}{$dev_id} = $hash;
 		setDevAttrList($name, 'consumptionData:1,0 '. $readingFnAttributes);
 		if ($init_done) {
-			CommandAttr(undef, '-silent '.$name.' devStateIcon on:Ventilator_wind@green off:Ventilator_fett@black');
-			CommandAttr(undef, '-silent '.$name.' event-on-change-reading .*');
-			CommandAttr(undef, '-silent '.$name.' room DaikinCloud_Devices');
-			CommandAttr(undef, '-silent '.$name.' webCmd onOffMode:setpoint:operationMode');
-			CommandAttr(undef, '-silent '.$name.' webCmdLabel Power<br>:Temperatur<br>:Modus<br>');
+			CommandAttr(undef, '-silent '.$name.' devStateIcon on:Ventilator_wind@green off:Ventilator_fett@black') if(!AttrVal($name,"devStateIcon",""));
+			CommandAttr(undef, '-silent '.$name.' event-on-change-reading .*') if(!AttrVal($name,"event-on-change-reading",""));
+			CommandAttr(undef, '-silent '.$name.' room DaikinCloud_Devices') if(!AttrVal($name,"room",""));
+			CommandAttr(undef, '-silent '.$name.' webCmd onOffMode:setpoint:operationMode') if(!AttrVal($name,"webCmd",""));
+			CommandAttr(undef, '-silent '.$name.' webCmdLabel Power<br>:Temperatur<br>:Modus<br>') if(!AttrVal($name,"webCmdLabel",""));
 		}
 	## handle define of IO-MASTER device as a bridge
 	} else {
@@ -124,23 +125,30 @@ sub DaikinCloud_Define($$)
 		$hash->{VERSION} = $DaikinCloud_version;
 		$hash->{helper}{secret_state} = DaikinCloud_CreateSecretState();
 		
+		my $test_hint = "";
 		if (int(@a) > 3) {
 			$hash->{CLIENT_ID} = $a[2];
 			$hash->{CLIENT_SECRET} = $a[3];
-			# $hash->{REDIRECT_URI} = defined($a[4]) ? $a[4] : 'https://oskar.pw/';
 			$hash->{REDIRECT_URI} = defined($a[4]) ? $a[4] : 'https://my.home-assistant.io/redirect/oauth';
+			
 		} else { ## if no parameters are given use the standard credentials
 			$hash->{CLIENT_ID} = 'emU20GdJDiiUxI_HnFGz69dD';
 			$hash->{CLIENT_SECRET} = 'TNL1ePwnOkf6o2gKiI8InS8nVwTz2G__VYkv6WznzJGUnwLHLTmKYp-7RZc6FA3yS6D0Wgj_snvqsU5H_LPHQA';
 			$hash->{REDIRECT_URI} = 'https://my.home-assistant.io/redirect/oauth';
-			$hash->{DEF} = $hash->{CLIENT_ID}.' '.$hash->{CLIENT_SECRET}.' '.$hash->{REDIRECT_URI}
+			$hash->{DEF} = $hash->{CLIENT_ID}.' '.$hash->{CLIENT_SECRET}.' '.$hash->{REDIRECT_URI};
+			$test_hint = "<br><br><b>Important: The test-credentials will only functioning till End of August 2024! ".
+			"Go to the <a href=\"https://developer.cloud.daikineurope.com/login\" target=\"_blank\">".
+			"Daikin Developer Portal</a> and create your own app with CLIENT_ID, CLIENT_SECRET and ".
+			"REDIRECT_URI. Then do a redefine of your Master-Device: defmod &lt;NAME&gt; ".
+			"DaikinCloud &lt;CLIENT_ID&gt; &lt;CLIENT_SECRET&gt; &lt;REDIRECT_URI&gt;</b><br><br>";
 		}
 		
-		$hash->{AUTHORIZATION_LINK} = "<html><a href=\"".$daikin_oidc_url.
+		$hash->{AUTHORIZATION_LINK} = "<html><b><a href=\"".$daikin_oidc_url.
 			"authorize?response_type=code"."&client_id=".$hash->{CLIENT_ID}.
 			"&redirect_uri=".urlEncode($hash->{REDIRECT_URI}).
 			"&scope=openid%20onecta%3Abasic.integration&state=".$hash->{helper}{secret_state}.
-			"\" target=\"_blank\">Daikin Cloud Login (OAuth2)</a></html>";
+			"\" target=\"_blank\">Daikin Cloud Login (OAuth2)</a></b> ".$test_hint. 
+			"</html>";
 		
 		$modules{DaikinCloud}{defptr}{IOMASTER} = $hash;
 		
@@ -160,10 +168,10 @@ sub DaikinCloud_Define($$)
 		 
 		setDevAttrList($name, 'autocreate:1,0 interval consumptionData:1,0 saveRawData:1,0'. $readingFnAttributes);
 		if ($init_done) {
-			CommandAttr(undef, '-silent '.$name.' autocreate 1');
-			CommandAttr(undef, '-silent '.$name.' interval 900');
-			CommandAttr(undef, '-silent '.$name.' consumptionData 1');
-			CommandAttr(undef, '-silent '.$name.' room DaikinCloud_Devices');				
+			CommandAttr(undef, '-silent '.$name.' autocreate 1') if(!AttrVal($name,"autocreate",""));
+			CommandAttr(undef, '-silent '.$name.' interval 900') if(!AttrVal($name,"interval",""));
+			CommandAttr(undef, '-silent '.$name.' consumptionData 1') if(!AttrVal($name,"consumptionData",""));
+			CommandAttr(undef, '-silent '.$name.' room DaikinCloud_Devices') if(!AttrVal($name,"room",""));				
 		}
 	}
 	return undef;
@@ -1188,53 +1196,52 @@ sub DaikinCloud_CallbackUpdateRequest
   <ul>
     <ul>
       <br>
-	  First a master device has to be defined to handle the access to the 
-      cloud. For this purpose there are two options:<br><br>
-	  <b><u>1. Individual definition of the master device</u></b><br><br>
-      <code>define &lt;NAME&gt; DaikinCloud &lt;CLIENT_ID&gt; 
-	  &lt;CLIENT_SECRET&gt; &lt;REDIRECT_URI&gt;</code><br>
+      First a master device has to be defined to handle the access to the 
+      cloud:<br><br>
+      <b><u>Definition of the master device</u></b><br><br>
+      <code>define &lt;NAME DAIKIN_MASTER&gt; DaikinCloud &lt;CLIENT_ID&gt; 
+      &lt;CLIENT_SECRET&gt; &lt;REDIRECT_URI&gt;</code><br>
       <br>
       Go to the <a href="https://developer.cloud.daikineurope.com/login" 
-	  target="_blank">Daikin Developer Portal</a> to create your own APP with
-	  an individual CLIENT_ID and CLIENT_SECRET and create your own REDIRECT_URI 
-	  (https://&lt;IP FHEM&gt;:8083/fhem?cmd.Test=set%20DaikinMaster%20AuthCode%20).
-	  It is important to correctly define the REDIRECT_URI. This REDIRECT_URI must 
-	  contain the host that you set yourself in the browser for access FHEM, usually 
-	  the IP address of the FHEM server. This is intended to send the authorization 
-	  code as a command via FHEMWEB API be transferred to the defined master device 
-	  (here e.g. DaikinMaster). Just as the REDIRECT_URI has been defined in the 
-	  Daikin Developer Portal, it must also be specified in the device definition in 
-	  FHEM. When using the csrfToken in FHEM, a static token must be used and 
-	  appended to the REDIRECT_URI (&fwcsrf=myToken123). Here too, the REDIRECT_URI 
-	  in the Daikin Developer Portal must be 100% identical to the information in the 
-	  device definition in FHEM!
+      target="_blank">Daikin Developer Portal</a> to create your own APP with
+      an individual CLIENT_ID and CLIENT_SECRET and define the REDIRECT_URI.
+      The easiest way ist to use https://my.home-assistant.io/redirect/oauth as
+      the REDIRECT_URI.<br><br>
+      Of course you can also define an individual REDIRECT_URI by the following scheme:
 	  <br><br>
-	  After the master device has been created, a Daikin cloud login (OAuth2) is 
-	  required. The individual link is stored in the internals (Internal 
-	  AUTHORIZATION_LINK). After a successful login, the access token and the 
-	  refresh token are automatically saved in FHEM.
-	  <br><br>
-	  Since the individual definition is more complex and presents various pitfalls, 
-	  especially when using security functions such as csrfToken or access 
-	  restrictions in FHEM, the following workaround is also available:
-	  <br><br>
-	  <b><u>2. Definition of the master device via standard parameters</u></b><br><br>
-	  Alternatively, the master device can also be defined with general standard 
-	  settings:<br><br>
-	  <code>define &lt;NAME&gt; DaikinCloud</code><br>
-      <br>
-	  In this case https://my.home-assistant.io/redirect/oauth is used as the 
-	  REDIRECT_URI. The Daikin Cloud Login (OAuth2) is also accessed via the Internal 
-	  AUTHORIZATION_LINK. After you have agreed to the terms of use and allowed the 
-	  release of the data, you will be redirected to the REDIRECT_URI. Before you 
-	  click away an error message like "Invalid parameters given", the complete link 
-	  to the website must be copied from the browser 
-	  (https://my.home-assistant.io/redirect/oauth/?code=xxxxxxxxxxxx) to the clipboard 
-	  and stored in FHEM can be entered as set-command:<br><br>
-	  <code>set DaikinMaster AuthCode &lt;complete link of return URL&gt;
-	  </code><br><br>
-	  This completes the setup of the master device.<br><br>
-	  <b><u>Definition of indoor units</u></b><br><br>	  
+      https://&lt;IP FHEM&gt;:8083/fhem?cmd.Test=set%20DaikinMaster%20AuthCode%20
+      <br><br> 
+      It is important to correctly define the REDIRECT_URI. This REDIRECT_URI must 
+      contain the host that you set yourself in the browser for access FHEM, usually 
+      the IP address of the FHEM server. This is intended to send the authorization 
+      code as a command via FHEMWEB API be transferred to the defined master device 
+      (here e.g. DaikinMaster). Just as the REDIRECT_URI has been defined in the 
+      Daikin Developer Portal, it must also be specified in the device definition in 
+      FHEM. When using the csrfToken in FHEM, a static token must be used and 
+      appended to the REDIRECT_URI (&fwcsrf=myToken123). Here too, the REDIRECT_URI 
+      in the Daikin Developer Portal must be 100% identical to the information in the 
+      device definition in FHEM!
+      <br><br>
+      Since the individual definition is more complex and presents various pitfalls, 
+      especially when using security functions such as csrfToken or access 
+      restrictions in FHEM, I would recommed to rookies to use the generic REDIRECT_URI
+      https://my.home-assistant.io/redirect/oauth instead.
+      <br><br>
+      After the master device has been created, a Daikin cloud login (OAuth2) is 
+      required. The individual link is stored in the internals (Internal 
+      AUTHORIZATION_LINK). After you have agreed to the terms of use and allowed the 
+      release of the data, you will be redirected to the REDIRECT_URI. If you have 
+      configured an individual REDIRECT_URI for FHEM, the authorization code is 
+      automatically passed to FHEM. If this doesn't work, check your REDIRECT_URI 
+      or use the generic REDIRECT_URI given above. When using the generic REDIRECT_URI:
+      Do not click away an error message like "Invalid parameters given", because you 
+      have to copy the complete redirect-link of the website from the browser
+      (https://my.home-assistant.io/redirect/oauth/?code=xxxxxxxxxxxx) to the clipboard.
+      Then enter the following command in FHEM:<br><br>
+      <code>set &lt;NAME DAIKIN_MASTER&gt; AuthCode &lt;complete link of return URL&gt;
+      </code><br><br>
+      This completes the setup of the master device.<br><br>
+      <b><u>Definition of indoor units</u></b><br><br>
       Thereafter for each indoor unit one device has to be defined. It is 
       easiest to let the devices be autocreated (see attributes). Otherwise 
       they can also be created manually if the device-id is known:<br><br>
@@ -1249,9 +1256,9 @@ sub DaikinCloud_CallbackUpdateRequest
       <a id="DaikinCloud-set-AuthCode"></a>
       <li><b>AuthCode</b><br>
         The Daikin-Cloud-Login (OAuth2) returns a temporary authorization-code
-		to get the access-token and a refresh-token. If the automatic process
-		fails, you can set the authorization-code (=return of the redirect-uri)
-		manually.
+        to get the access-token and a refresh-token. If the automatic process
+        fails, you can set the authorization-code (=return of the redirect-uri)
+        manually.
       </li>
       <a id="DaikinCloud-set-Logout"></a>
       <li><b>Logout</b><br>
@@ -1259,8 +1266,8 @@ sub DaikinCloud_CallbackUpdateRequest
       </li><br>
     </ul>
     The following set commands depend on the capabilities of the respective 
-	indoor units. Not all commands are supported in Daikin's new API. Therefore, 
-	only the possible and permitted commands are always displayed!<br>
+    indoor units. Not all commands are supported in Daikin's new API. Therefore, 
+    only the possible and permitted commands are always displayed!<br>
     <br>
     <ul>
       <a id="DaikinCloud-set-demandControl"></a>
@@ -1322,10 +1329,10 @@ sub DaikinCloud_CallbackUpdateRequest
         range. The range is determined by the operationMode and the indoor unit 
         (resolution 0.5 degrees).
       </li>
-	  <a id="DaikinCloud-set-offset"></a>
+      <a id="DaikinCloud-set-offset"></a>
       <li><b>offset</b> [ -10 .. 10 ]<br>
         Sets an offset value to the setpoint (e.g. flow temperature) to adjust it 
-		(available on Altherma units depending on the configuration).
+        (available on Altherma units depending on the configuration).
       </li>
       <a id="DaikinCloud-set-swing"></a>
       <li><b>swing</b> [ stop | horizontal | vertical | 3dswing | windNice ]<br>
@@ -1371,11 +1378,11 @@ sub DaikinCloud_CallbackUpdateRequest
         <br>
       </li>
       <a id="DaikinCloud-attr-interval"></a>
-      <li><b>interval</b> [ 900 .. &infin; ]<br>
+      <li><b>interval</b> [ 0 | 900 .. &infin; ]<br>
         Defines the interval in seconds for requesting actual data from the cloud. 
         The minimum possible interval is 900 seconds because there ist actually a
-		request limit of 200 requests a day (include set-commands). 
-		Default is 900 seconds.<br>
+        request limit of 200 requests a day (include set-commands). 
+        Default is 900 seconds. If set to 0, the polling will be disabled. <br>
       </li>
     </ul>
   </ul>
@@ -1421,55 +1428,57 @@ sub DaikinCloud_CallbackUpdateRequest
     <ul>
       <br>
       Zuerst muss ein Master-Device (bzw. eine Bridge) definiert werden, 
-      welches den Zugriff auf die Cloud erm&ouml;glicht. Hierf&uuml; gibt es
-	  zwei M&ouml;glichkeiten:<br><br>
-	  <b><u>1. Individuelle Definition des Master-Devices</u></b><br><br>
-      <code>define &lt;NAME&gt; DaikinCloud &lt;CLIENT_ID&gt; 
-	  &lt;CLIENT_SECRET&gt; &lt;REDIRECT_URI&gt;</code><br>
+      welches den Zugriff auf die Cloud erm&ouml;glicht:<br><br>
+      <b><u>Definition des Master-Devices</u></b><br><br>
+      <code>define &lt;NAME DAIKIN_MASTER&gt; DaikinCloud &lt;CLIENT_ID&gt; 
+      &lt;CLIENT_SECRET&gt; &lt;REDIRECT_URI&gt;</code><br>
       <br>
       Gehe auf das <a href="https://developer.cloud.daikineurope.com/login" 
-	  target="_blank">Daikin Developer Portal</a>, um eine eigene APP mit 
-	  einer individuellen CLIENT_ID und CLIENT_SECRET zu erstellen und deine eigene 
-	  REDIRECT_URI (https://&lt;IP FHEM&gt;:8083/fhem?cmd.Test=set%20DaikinMaster%20AuthCode%20)
-	  zu definieren. Wichtig ist die zutreffende Definition der REDIRECT_URI. 
-	  Diese REDIRECT_URI muss den Host enthalten, den man selbst im Browser für den 
-	  Zugriff auf FHEM verwendet, also in der Regel die IP-Adresse des FHEM-Servers. 
-	  Damit soll &uuml;ber die WEB-API von FHEM der Authorisierungscode als Kommando 
-	  in das definierte Master-Device (hier z.B. DaikinMaster) &uuml;bergeben werden. 
-	  So wie die REDIRECT_URI im Daikin Developer Portal definiert worden ist, muss
-	  sie auch in der Ger&auml;tedefinition in FHEM angegeben werden. Bei Benutzung 
-	  des csrfToken in FHEM, muss ein statisches Token verwendet werden und dieses
-	  an die REDIRECT_URI angehangen werden (&fwcsrf=myToken123). Auch hier gilt, 
-	  dass die REDIRECT_URI im Daikin Developer Portal zu 100% <b>identisch</b> sein 
-	  muss mit der Angabe in der Ger&auml;tedefinition in FHEM!
+      target="_blank">Daikin Developer Portal</a>, um eine eigene APP mit 
+      einer individuellen CLIENT_ID und CLIENT_SECRET zu erstellen und deine 
+      REDIRECT_URI zu definieren. Am einfachsten und schnellsten geht es, 
+      als REDIRECT_URI die Adresse https://my.home-assistant.io/redirect/oauth 
+      zu verwenden.<br><br>
+      Es besteht auch die M&ouml;glichkeit, eine individuelle REDIRECT_URI für 
+      FHEM zu definieren. Diese muss nach folgendem Schema erstellt/definiert werden:
 	  <br><br>
-	  Nachdem das Master-Device angelegt worden ist, ist ein Daikin-Cloud-Login (OAuth2)
-	  erforderlich. Der individuelle Link ist in den Internals gespeichert 
-	  (Internal AUTHORIZATION_LINK). Nach einem erfolgreichen Login werden der 
-	  access-token und der refresh-token in FHEM automatisch gespeichert.
-	  <br><br>
-	  Da die individuelle Definition aufw&auml;ndiger und insbesondere bei Verwendung 
-	  von Sicherheitsfunktion wie csrfToken oder Zugriffsbeschr&auml;nkungen in FHEM 
-	  verschiedene Fallstricke bereit h&auml;lt, steht auch folgende Umgehungsl&ouml;sung
-	  bereit:
-	  <br><br>
-	  <b><u>2. Definition des Master-Devices &uuml;ber Standardparameter</u></b><br><br>
-	  Alternativ kann das Master-Device auch mit allgemeinen Standard-Einstellungen 
-	  definiert werden:<br><br>
-	  <code>define &lt;NAME&gt; DaikinCloud</code><br>
-      <br>
-	  Als REDIRECT_URI wird in diesem Fall https://my.home-assistant.io/redirect/oauth
-	  mitbenutzt. Der Aufruf des Daikin-Cloud-Login (OAuth2) erfolgt ebenfalls &uuml;ber
-	  das Internal AUTHORIZATION_LINK. Nachdem ihr den Nutzungsbedingungen zugestimmt 
-	  und die Freigabe der Daten erlaubt habt, werdet ihr auf die REDIRECT_URI 
-	  weitergeleitet. Bevor ihr eine Fehlermeldung wie "Invalid paramaters given" 
-	  wegklickt, muss der komplette Link der Internetseite aus dem Browser 
-	  (https://my.home-assistant.io/redirect/oauth/?code=xxxxxxxxxxxx) in die 
-	  Zwischenablage kopiert und in FHEM als set-command eingegeben werden:<br><br>
-	  <code>set DaikinMaster AuthCode &lt;kompletter Link der R&uuml;ckgabe-URL&gt;
-	  </code><br><br>
-	  Damit ist die Einrichtung des Master-Device abgeschlossen.<br><br>
-	  <b><u>Definition der Innenger&auml;te</u></b><br><br>	  
+      https://&lt;IP FHEM&gt;:8083/fhem?cmd.Test=set%20DaikinMaster%20AuthCode%20
+      <br><br> 
+      Diese REDIRECT_URI muss den Host enthalten, den man selbst im Browser für den 
+      Zugriff auf FHEM verwendet, also in der Regel die IP-Adresse des FHEM-Servers. 
+      Damit soll &uuml;ber die WEB-API von FHEM der Authorisierungscode als Kommando 
+      in das definierte Master-Device (hier z.B. DaikinMaster) &uuml;bergeben werden. 
+      So wie die REDIRECT_URI im Daikin Developer Portal definiert worden ist, muss
+      sie auch in der Ger&auml;tedefinition in FHEM angegeben werden. Bei Benutzung 
+      des csrfToken in FHEM, muss ein statisches Token verwendet werden und dieses
+      an die REDIRECT_URI angehangen werden (&fwcsrf=myToken123). Auch hier gilt, 
+      dass die REDIRECT_URI im Daikin Developer Portal zu 100% <b>identisch</b> sein 
+      muss mit der Angabe in der Ger&auml;tedefinition in FHEM!
+      <br><br>
+      Da die individuelle Definition aufw&auml;ndiger und insbesondere bei Verwendung 
+      von Sicherheitsfunktion wie csrfToken oder Zugriffsbeschr&auml;nkungen in FHEM 
+      verschiedene Fallstricke bereit h&auml;lt, kann ich jedem Einsteiger nur empfehlen 
+      stattdessen https://my.home-assistant.io/redirect/oauth als REDIRECT_URI zu verwenden.
+      <br><br>
+      Nachdem das Master-Device angelegt worden ist, ist ein Daikin-Cloud-Login (OAuth2)
+      erforderlich. Der individuelle Link ist in den Internals gespeichert 
+      (Internal AUTHORIZATION_LINK). Ihr werdet auf die Seite von Daikin geleitet, 
+      m&uuml;sst euch dort einloggen, den Nutzungsbedingungen zustimmen und die Freigabe 
+      der Daten erlauben. Anschliessend werdet ihr auf die REDIRECT_URI weitergeleitet.
+      <br><br>
+      Wenn ihr eine individuelle REDIRECT_URI für FHEM konfiguriert habt, wird der 
+      Authorisierungscode automatisch an FHEM &uuml;bergeben. Wenn dies nicht funktioniert, 
+      &uuml;berpr&uuml;ft eure REDIRECT_URI oder verwendet die oben angegebene allgemeime 
+      REDIRECT_URI. Als REDIRECT_URI wird in diesem Fall 
+      https://my.home-assistant.io/redirect/oauth mitbenutzt. Bevor ihr eine Fehlermeldung 
+      wie "Invalid paramaters given" wegklickt, muss der komplette Link der Internetseite 
+      aus dem Browser (https://my.home-assistant.io/redirect/oauth/?code=xxxxxxxxxxxx) 
+      in die Zwischenablage kopiert und in FHEM als set-command eingegeben werden:<br><br>
+      <code>set &lt;NAME DAIKIN_MASTER&gt; AuthCode &lt;kompletter Link der R&uuml;ckgabe-URL&gt;
+      </code><br><br>
+      Damit ist die Einrichtung des Master-Device abgeschlossen.<br><br>
+      <b><u>Definition der Innenger&auml;te</u></b>
+      <br><br>
       Danach ist f&uuml;r jedes Innenger&auml;t ein Device zu definieren. 
       Es ist am einfachsten, die Devices automatisch erstellen zu lassen 
       (siehe Attribute). Ansonsten k&ouml;nnen sie auch manuell erstellt 
@@ -1485,21 +1494,21 @@ sub DaikinCloud_CallbackUpdateRequest
       <a id="DaikinCloud-set-AuthCode"></a>
       <li><b>AuthCode</b><br>
         Der Daikin-Cloud-Login (OAuth2) gibt einen tempor&auml;ren 
-		Autorisierungscode zur&uuml;ck. Falls der automatische Prozess
-		scheitert, kann der Autorisierungscode (= R&uuml;ckgabe an die
-		redirect-uri) auch manuell gesetzt werden.
+        Autorisierungscode zur&uuml;ck. Falls der automatische Prozess
+        scheitert, kann der Autorisierungscode (= R&uuml;ckgabe an die
+        redirect-uri) auch manuell gesetzt werden.
       </li>
       <a id="DaikinCloud-set-Logout"></a>
       <li><b>Logout</b><br>
         Um den Zugriff auf die Cloud zu beenden, kannst du dich ausloggen.
-		Der access-token und der refresh-token werden dabei zur&uuml;ckgegeben 
-		und ung&uuml;ltig gesetzt.
+        Der access-token und der refresh-token werden dabei zur&uuml;ckgegeben 
+        und ung&uuml;ltig gesetzt.
       </li><br>
     </ul>
     Die folgenden Set-Befehle h&auml;ngen von den M&ouml;glichkeiten der 
     jeweiligen Innenger&auml;te ab. In der neuen API von Daikin werden 
-	nicht mehr alle Befehle unterst&uuml;tzt. Es werden daher immer nur die
-	m&ouml;glichen und zul&auml;ssigen Befehle angezeigt!<br>
+    nicht mehr alle Befehle unterst&uuml;tzt. Es werden daher immer nur die
+    m&ouml;glichen und zul&auml;ssigen Befehle angezeigt!<br>
     <br>
     <ul>
       <a id="DaikinCloud-set-demandControl"></a>
@@ -1569,11 +1578,11 @@ sub DaikinCloud_CallbackUpdateRequest
         Der erlaubte Bereich ist abh&auml;ngig vom Operation-Modus und von der
         Art des Innenger&auml;tes (Aufl&oumlsung 0.5 Grad).
       </li>
-	  <a id="DaikinCloud-set-offset"></a>
+      <a id="DaikinCloud-set-offset"></a>
       <li><b>offset</b> [ -10 .. 10 ]<br>
         Setzt einen Offset-Wert zum Sollwert (z.B. Vorlauftemperatur), um 
-		diesen anzupassen (bei Altherma-Ger&auml;ten je nach Konfiguration
-		verf&uuml;gbar). 
+        diesen anzupassen (bei Altherma-Ger&auml;ten je nach Konfiguration
+        verf&uuml;gbar). 
       </li>
       <a id="DaikinCloud-set-swing"></a>
       <li><b>swing</b> [ stop | horizontal | vertical | 3dswing | windNice ]<br>
@@ -1625,12 +1634,13 @@ sub DaikinCloud_CallbackUpdateRequest
         <br>
       </li>
       <a id="DaikinCloud-attr-interval"></a>
-      <li><b>interval</b> [ 900 .. &infin; ]<br>
+      <li><b>interval</b> [ 0 | 900 .. &infin; ]<br>
         Definiert das Intervall in Sekunden, innerhalb dessen die aktuellen 
         Daten aus der Cloud jeweils abgefragt werden sollen. Das Minimum 
         betr&auml;gt 900 Sekunden, da ein aktuell ein Tageslimit mit maximal
-		200 Anfragen (inklusive Set-Befehle) pro Tag an die Cloud besteht.
-		Standard sind 900 Sekunden. Dieses Attribut ist nur 
+        200 Anfragen (inklusive Set-Befehle) pro Tag an die Cloud besteht.
+        Standard sind 900 Sekunden. Wenn das Attribut auf 0 gesetzt wird, 
+        wird der automatisierte Abruf deaktiviert. Dieses Attribut ist nur 
         im Master-Device verf&uuml;gbar.<br>
       </li>
     </ul>
