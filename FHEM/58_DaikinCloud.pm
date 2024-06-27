@@ -8,6 +8,7 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
+# v2.1.11- 27.06.2024 fix: append managementpoint to values (e.g. domesticHotWaterTank)
 # v2.1.10- 25.06.2024 modify device: keep attributes, hint for test-credentials, update doku
 # v2.1.9 - 19.06.2024 back to test credentials (rate-limit seems to be per app!)
 # v2.1.8 - 15.06.2024 individual credentials, doku
@@ -36,7 +37,7 @@ use HttpUtils;
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.10 - 25.06.2024';
+my $DaikinCloud_version = 'v2.1.11 - 27.06.2024';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
@@ -967,8 +968,8 @@ sub DaikinCloud_GetDetailData($$$$$$$)
 			elsif ($path =~ m/demandControl.*_fixed/i) { $rdg = 'demandValue'; } 
 			else { $rdg = $key;}
 			
-			if ($rdg ne '') {
-				$rdg .= '_'.$mp if ($key =~ m/(isIn|isHoliday|errorCode|firmware|iconId|modelInfo|software)/i);
+			if ($rdg ne '') { #fix: append managementpoint
+				$rdg .= '_'.$mp if (($key =~ m/(isIn|isHoliday|errorCode|firmware|iconId|modelInfo|software)/i) || (($mp !~ m/climateControl/i) && ($mp ne '')));
 				readingsBulkUpdate($defptr, $rdg, $data->{$skey} );
 			}
 		## if values -> check if settable = true and create a table with set-cmds			
