@@ -1,4 +1,4 @@
 DaikinCloud
 - Umstellung auf die neue OPEN-API
-- Update auf v2.1.10 (modify device: keep attributes, hint for test-credentials, update doku)
+- Update auf v2.1.11 (fix: append managementpoint to values (e.g. domesticHotWaterTank))
 - ausführlicher Changelog im Modul (https://github.com/frank-lie/DaikinCloud/blob/main/FHEM/58_DaikinCloud.pm)
