@@ -8,6 +8,7 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
+# v2.1.12- 28.06.2024 fix: prevent permanently loopback when always HTTP-Status-Code=401
 # v2.1.11- 27.06.2024 fix: append managementpoint to values (e.g. domesticHotWaterTank)
 # v2.1.10- 25.06.2024 modify device: keep attributes, hint for test-credentials, update doku
 # v2.1.9 - 19.06.2024 back to test credentials (rate-limit seems to be per app!)
@@ -37,7 +38,7 @@ use HttpUtils;
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.11 - 27.06.2024';
+my $DaikinCloud_version = 'v2.1.12 - 28.06.2024';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
@@ -703,12 +704,15 @@ sub DaikinCloud_SetCmdResponse($)
 		Log3 $hash, 1, "DaikinCloud (Set-Cmd): $err";
 		
 	} elsif ($param->{code} == 401 ) {
-		readingsSingleUpdate($hash, 'status_setcmd', 'refreshing token ...', 1 );
-		Log3 $hash, 3, 'DaikinCloud (Set-Cmd): Need to refresh access-token. Automatically starting RefreshToken!';
-		## give cmd back to queue, update token and transmit command after refresh token
-		unshift (@{$hash->{helper}{setQueue}},$param->{dc_id},$param->{dc_path},$param->{dc_value});
-		DaikinCloud_RefreshToken();
-		
+		if (ReadingsVal($hash->{NAME}, 'status_setcmd', 'none') ne 'refreshing token ...') {
+			readingsSingleUpdate($hash, 'status_setcmd', 'refreshing token ...', 1 );
+			Log3 $hash, 3, 'DaikinCloud (Set-Cmd): Need to refresh access-token. Automatically starting RefreshToken!';
+			## give cmd back to queue, update token and transmit command after refresh token
+			unshift (@{$hash->{helper}{setQueue}},$param->{dc_id},$param->{dc_path},$param->{dc_value});
+			DaikinCloud_RefreshToken();
+		} else {
+			Log3 $hash, 3, 'DaikinCloud (Set-Cmd): Repeated HTTP-CODE 401 - Failed to set command for device '.$param->{dc_id}.' path: '.$param->{dc_path}.' value: '.$param->{dc_value};
+		}
 	} elsif ($param->{code} == 429) {
 		## give cmd back to queue, retry after request limit is over
 		unshift (@{$hash->{helper}{setQueue}},$param->{dc_id},$param->{dc_path},$param->{dc_value});
@@ -1063,7 +1067,7 @@ sub DaikinCloud_CallbackUpdateRequest
 		Log3 $hash, 2, $errortext;
 		readingsSingleUpdate($hash, 'update_response', $errortext , 1 );
 		if ($param->{code} == 401 ){
-			DaikinCloud_RefreshToken();
+			delete $hash->{helper}{ACCESS_TOKEN} if (defined($hash->{helper}) && defined($hash->{helper}{ACCESS_TOKEN}));
 		}
 		if ($param->{code} == 429 ){ ## if too many request (429)
 			DaikinCloud_CheckRetryAfter('DaikinCloud_UpdateRequest','update_response','CallbackUpdateRequest');			
