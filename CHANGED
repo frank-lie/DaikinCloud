@@ -1,4 +1,4 @@
 DaikinCloud
 - Umstellung auf die neue OPEN-API
-- Update auf v2.1.12 (fix: prevent permanently loopback)
+- Update auf v2.1.13 (fix: individual redirect-url)
 - ausführlicher Changelog im Modul (https://github.com/frank-lie/DaikinCloud/blob/main/FHEM/58_DaikinCloud.pm)
