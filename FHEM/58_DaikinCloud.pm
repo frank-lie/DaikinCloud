@@ -8,6 +8,7 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
+# v2.1.13- 07.07.2024 fix: individuel redirect-url -> evaluate FW_webArgs for AuthCode
 # v2.1.12- 28.06.2024 fix: prevent permanently loopback when always HTTP-Status-Code=401
 # v2.1.11- 27.06.2024 fix: append managementpoint to values (e.g. domesticHotWaterTank)
 # v2.1.10- 25.06.2024 modify device: keep attributes, hint for test-credentials, update doku
@@ -33,12 +34,13 @@ use warnings;
 
 use Time::HiRes qw(gettimeofday time);
 use HttpUtils;
+use vars qw(%FW_webArgs);
 
 ## try to use JSON::XS, otherwise use own decoding sub
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.12 - 28.06.2024';
+my $DaikinCloud_version = 'v2.1.13 - 07.07.2024';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
@@ -276,8 +278,11 @@ sub DaikinCloud_GetToken($)
 	}
 	
 	$code = urlDecode($code);
-	$code = $1 if ($code =~ m/code=([^&]*)/);	
-	return "No valid AuthCode" if (length($code)<20);
+	$code = $1 if ($code =~ m/code=([^&]*)/);
+	if (length($code)<20) {
+		$code = $FW_webArgs{"code"} if defined($FW_webArgs{"code"});
+		return "No valid AuthCode" if (length($code)<20);
+	}	
 	
 	HttpUtils_NonblockingGet(
 	{
