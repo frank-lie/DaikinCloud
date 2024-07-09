@@ -8,6 +8,7 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
+# v2.1.14- 09.07.2024 fix: correct errortext for failed response
 # v2.1.13- 07.07.2024 fix: individuel redirect-url -> evaluate FW_webArgs for AuthCode
 # v2.1.12- 28.06.2024 fix: prevent permanently loopback when always HTTP-Status-Code=401
 # v2.1.11- 27.06.2024 fix: append managementpoint to values (e.g. domesticHotWaterTank)
@@ -40,7 +41,7 @@ use vars qw(%FW_webArgs);
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.13 - 07.07.2024';
+my $DaikinCloud_version = 'v2.1.14 - 09.07.2024';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
@@ -207,9 +208,12 @@ sub DaikinCloud_CallbackGetToken
 		
 	if ( $err || $param->{code} != 200 ) { 
 		my $errortext = 'DaikinCloud (CallbackGetToken) failed: ';
-		$errortext .= $err if ($err);
-		$errortext .= "HTTP-Status-Code=" . $param->{code};
-		$errortext .= " Response: " . $data if (defined($data));
+		if ($err) {
+			$errortext .= $err ;
+		} else {
+			$errortext .= "HTTP-Status-Code=" . $param->{code} if (defined($param->{code}));
+			$errortext .= " Response: " . $data if (defined($data));
+		}
 		Log3 $hash, 2, $errortext;
 		readingsBeginUpdate($hash);
 		readingsBulkUpdate($hash, 'token_status', $errortext );
@@ -363,9 +367,12 @@ sub DaikinCloud_CallbackRevokeToken
 			
 	if ( $err || $param->{code} != 200 ) { 
 		my $errortext = 'DaikinCloud (CallbackRevokeToken) failed: ';
-		$errortext .= $err if ($err);
-		$errortext .= "HTTP-Status-Code=" . $param->{code};
-		$errortext .= " Response: " . $data if (defined($data));
+		if ($err) {
+			$errortext .= $err ;
+		} else {
+			$errortext .= "HTTP-Status-Code=" . $param->{code} if (defined($param->{code}));
+			$errortext .= " Response: " . $data if (defined($data));
+		}
 		Log3 $hash, 2, $errortext;
 		readingsSingleUpdate($hash, 'token_status', $errortext , 1 );
 		return;
@@ -1066,9 +1073,12 @@ sub DaikinCloud_CallbackUpdateRequest
 	
 	if ( $err || $param->{code} != 200 ) { 
 		my $errortext = 'DaikinCloud (CallbackUpdateRequest) failed: ';
-		$errortext .= $err if ($err);
-		$errortext .= "HTTP-Status-Code=" . $param->{code};
-		$errortext .= " Response: " . $data if (defined($data));
+		if ($err) {
+			$errortext .= $err ;
+		} else {
+			$errortext .= "HTTP-Status-Code=" . $param->{code} if (defined($param->{code}));
+			$errortext .= " Response: " . $data if (defined($data));
+		}
 		Log3 $hash, 2, $errortext;
 		readingsSingleUpdate($hash, 'update_response', $errortext , 1 );
 		if ($param->{code} == 401 ){
