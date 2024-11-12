@@ -8,6 +8,7 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
+# v2.1.15- 12.11.2024 support SetExtensions (on-for-timer, off-for-timer) an short commands (on, off)
 # v2.1.14- 09.07.2024 fix: correct errortext for failed response
 # v2.1.13- 07.07.2024 fix: individuel redirect-url -> evaluate FW_webArgs for AuthCode
 # v2.1.12- 28.06.2024 fix: prevent permanently loopback when always HTTP-Status-Code=401
@@ -35,13 +36,15 @@ use warnings;
 
 use Time::HiRes qw(gettimeofday time);
 use HttpUtils;
+use SetExtensions;
+
 use vars qw(%FW_webArgs);
 
 ## try to use JSON::XS, otherwise use own decoding sub
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.14 - 09.07.2024';
+my $DaikinCloud_version = 'v2.1.15 - 12.11.2024';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
@@ -488,8 +491,13 @@ sub DaikinCloud_setlist($)
 		$setlist =~ m/fanLevel:slider,(\d+),(\d+),(\d+)/;
 		for (my $i = $1; $i <= $3; $i+=$2) { 
 			$setlist .= ",Level$i";
-		}	
-	}		
+		}
+		$setlist .= ' ';
+	}
+	## merge short-cmd on/off
+	if ($setlist =~ m/onOffMode:/) {
+		$setlist .= 'on:noArg off:noArg on-for-timer off-for-timer';
+	}	
 	return 'DaikinCloud (Setlist): No settable found! Please forceUpdate first! ','' if ($setlist eq '');
 	return '',$setlist;
 }
@@ -536,10 +544,12 @@ sub DaikinCloud_Set($$$$)
 		my $setpoint = ReadingsVal($name, 'setpoint'.$appendix, 'unknown');
 		#v1.3.3 fix for set-cmd offset		
 		if ($cmd =~ /offset|setpoint|demandControl|fanMode|horizontal|vertical|econoMode|streamerMode|onOffMode|powerfulMode/i) {
+			SetExtensionsCancel($hash) if ($cmd =~ /onOffMode/i);
 			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$mode);
 			
 		## quick command on|off for onOffMode 
 		} elsif ($cmd eq 'on' || $cmd eq 'off' ) {
+			SetExtensionsCancel($hash);
 			$err .= DaikinCloud_CheckAndQueue($hash,'onOffMode',$cmd,$mode);
 			
 		## if fanLevel is set, the fanMode must be set to fixed	
@@ -588,7 +598,8 @@ sub DaikinCloud_Set($$$$)
 			$err .= DaikinCloud_CheckAndQueue($hash,$cmd,$value,$value);
 			
 		} else {
-			$err .= "unknown argument $cmd, choose one of $setlist"; #fix v1.0.2
+			$err .= SetExtensions($hash, $setlist, $name, $cmd, @a) || '';
+			#$err .= "unknown argument $cmd, choose one of $setlist"; #fix v1.0.2
 		}
 		## all cmd & value are already in queue -> send the cmd to the cloud
 		$err .= DaikinCloud_SetCmd();
@@ -1081,10 +1092,10 @@ sub DaikinCloud_CallbackUpdateRequest
 		}
 		Log3 $hash, 2, $errortext;
 		readingsSingleUpdate($hash, 'update_response', $errortext , 1 );
-		if ($param->{code} == 401 ){
+		if (defined($param->{code}) && $param->{code} == 401 ){
 			delete $hash->{helper}{ACCESS_TOKEN} if (defined($hash->{helper}) && defined($hash->{helper}{ACCESS_TOKEN}));
 		}
-		if ($param->{code} == 429 ){ ## if too many request (429)
+		if (defined($param->{code}) && $param->{code} == 429 ){ ## if too many request (429)
 			DaikinCloud_CheckRetryAfter('DaikinCloud_UpdateRequest','update_response','CallbackUpdateRequest');			
 		}				
 		return;
@@ -1223,12 +1234,12 @@ sub DaikinCloud_CallbackUpdateRequest
       &lt;CLIENT_SECRET&gt; &lt;REDIRECT_URI&gt;</code><br>
       <br>
       Go to the <a href="https://developer.cloud.daikineurope.com/login" 
-      target="_blank">Daikin Developer Portal</a> to create your own APP with
-      an individual CLIENT_ID and CLIENT_SECRET and define the REDIRECT_URI.
-      The easiest way ist to use https://my.home-assistant.io/redirect/oauth as
+      target="_blank">Daikin Developer Portal</a> to create your own APP with 
+      an individual CLIENT_ID and CLIENT_SECRET and define the REDIRECT_URI. 
+      The easiest way ist to use https://my.home-assistant.io/redirect/oauth as 
       the REDIRECT_URI.<br><br>
       Of course you can also define an individual REDIRECT_URI by the following scheme:
-	  <br><br>
+      <br><br>
       https://&lt;IP FHEM&gt;:8083/fhem?cmd.Test=set%20DaikinMaster%20AuthCode%20
       <br><br> 
       It is important to correctly define the REDIRECT_URI. This REDIRECT_URI must 
@@ -1244,7 +1255,7 @@ sub DaikinCloud_CallbackUpdateRequest
       <br><br>
       Since the individual definition is more complex and presents various pitfalls, 
       especially when using security functions such as csrfToken or access 
-      restrictions in FHEM, I would recommed to rookies to use the generic REDIRECT_URI
+      restrictions in FHEM, I would recommed to rookies to use the generic REDIRECT_URI 
       https://my.home-assistant.io/redirect/oauth instead.
       <br><br>
       After the master device has been created, a Daikin cloud login (OAuth2) is 
@@ -1253,10 +1264,10 @@ sub DaikinCloud_CallbackUpdateRequest
       release of the data, you will be redirected to the REDIRECT_URI. If you have 
       configured an individual REDIRECT_URI for FHEM, the authorization code is 
       automatically passed to FHEM. If this doesn't work, check your REDIRECT_URI 
-      or use the generic REDIRECT_URI given above. When using the generic REDIRECT_URI:
+      or use the generic REDIRECT_URI given above. When using the generic REDIRECT_URI: 
       Do not click away an error message like "Invalid parameters given", because you 
       have to copy the complete redirect-link of the website from the browser
-      (https://my.home-assistant.io/redirect/oauth/?code=xxxxxxxxxxxx) to the clipboard.
+      (https://my.home-assistant.io/redirect/oauth/?code=xxxxxxxxxxxx) to the clipboard. 
       Then enter the following command in FHEM:<br><br>
       <code>set &lt;NAME DAIKIN_MASTER&gt; AuthCode &lt;complete link of return URL&gt;
       </code><br><br>
@@ -1275,9 +1286,9 @@ sub DaikinCloud_CallbackUpdateRequest
       <br>
       <a id="DaikinCloud-set-AuthCode"></a>
       <li><b>AuthCode</b><br>
-        The Daikin-Cloud-Login (OAuth2) returns a temporary authorization-code
-        to get the access-token and a refresh-token. If the automatic process
-        fails, you can set the authorization-code (=return of the redirect-uri)
+        The Daikin-Cloud-Login (OAuth2) returns a temporary authorization-code 
+        to get the access-token and a refresh-token. If the automatic process 
+        fails, you can set the authorization-code (=return of the redirect-uri) 
         manually.
       </li>
       <a id="DaikinCloud-set-Logout"></a>
@@ -1293,14 +1304,14 @@ sub DaikinCloud_CallbackUpdateRequest
       <a id="DaikinCloud-set-demandControl"></a>
       <li><b>demandControl</b> [ off | auto | fixed ]<br>
         Select the control mode of the outdoor unit. The fixed mode can be 
-        selected manually to avoid a permanently toogling of the compressor
+        selected manually to avoid a permanently toogling of the compressor 
         or to save energy. Note: this option is maybe only available if you 
         are registered on the Daikin cloud as the owner, and not as a second 
         user.
       </li>
       <a id="DaikinCloud-set-demandValue"></a>
       <li><b>demandValue</b> [ 40 .. 100 ]<br>
-        If demandControl is fixed, choose a fixed value between 40 and 100
+        If demandControl is fixed, choose a fixed value between 40 and 100 
         (performance of the outdoor unit in percent, resolution 5). Note: 
         this option is  maybe only available if you are registered on the 
         Daikin cloud as the owner, and not as a second user.
@@ -1329,10 +1340,30 @@ sub DaikinCloud_CallbackUpdateRequest
       <li><b>onOffMode</b> [ on | off ]<br>
         Activate or deactivate the indoor unit.
       </li>
+      <a id="DaikinCloud-set-on"></a>
+      <li><b>on</b><br>
+        Switches the indoor unit on (short command for: onOffMode on).
+      </li>
+      <a id="DaikinCloud-set-off"></a>
+      <li><b>off</b><br>
+        Switches the indoor unit off (short command for: onOffMode off).
+      </li>
+      <a id="DaikinCloud-set-on-for-timer"></a>
+      <li><b>on-for-timer</b> [ 1 .. &infin; ]<br>
+        Switches the indoor unit on and will turn it off after the defined time 
+        (time in seconds). Other SetExtensions are also supported 
+        (e.g. on-till, on-till-overnight, etc).
+      </li>
+      <a id="DaikinCloud-set-off-for-timer"></a>
+      <li><b>off-for-timer</b> [ 1 .. &infin; ]<br>
+        Switches the indoor unit off and will turn it on after the defined time 
+        (time in seconds). Other SetExtensions are also supported 
+        (e.g. off-till, off-till-overnight, etc).
+      </li>
       <a id="DaikinCloud-set-operationMode"></a>
       <li><b>operationMode</b> [ fanOnly | heating | cooling | auto | dry ]<br>
-        Select the current operationmode of the device. Note that a multi-split
-        outdoor device can not process different operationsmodes of the indoor
+        Select the current operationmode of the device. Note that a multi-split 
+        outdoor device can not process different operationsmodes of the indoor 
         units simultaneously.
       </li>
       <a id="DaikinCloud-set-powerfulMode"></a>
@@ -1361,7 +1392,7 @@ sub DaikinCloud_CallbackUpdateRequest
       <a id="DaikinCloud-set-fanSpeed"></a>
       <li><b>fanSpeed</b> [ auto | quiet | Level1 | Level2 | Level3 | Level4 | Level5 ]<br>
         Only available if the device supports fanMode and fanLevel.
-      </li>     
+      </li>
     </ul>
   </ul>
   <br>
@@ -1371,8 +1402,8 @@ sub DaikinCloud_CallbackUpdateRequest
       <br>
       <a id="DaikinCloud-get-refreshToken"></a>
       <li><b>refreshToken</b><br>
-         The access-token normally expired in 3600 seconds. The access-token
-         can be refreshed. Usually the refresh of the access-token is done
+         The access-token normally expired in 3600 seconds. The access-token 
+         can be refreshed. Usually the refresh of the access-token is done 
          automatically. With this command you can manually refresh the access-token.
       </li>
       <a id="DaikinCloud-get-forceUpdate"></a>
@@ -1414,17 +1445,17 @@ sub DaikinCloud_CallbackUpdateRequest
       <a id="DaikinCloud-attr-consumptionData"></a>
       <li><b>consumptionData</b> [ 0 | 1 ]<br>
         <i>Master device:</i> If set to 1 the transmitted data will also evaluate 
-        consumption data. The read out consumption data is stored as total
-        values in the readings kWh_[heating|cooling]_[day|week|year].
+        consumption data. The read out consumption data is stored as total 
+        values in the readings kWh_[heating|cooling]_[day|week|year]. 
         <br><br>
         <i>Indoor unit:</i> If set to 1 additional the raw data of the energy 
-        readings are saved in this device. Note that this requires to set the  
+        readings are saved in this device. Note that this requires to set the 
         attribut consumptionData to 1 in the master device. The raw data is saved 
-        in the readings energy_[heating|cooling]_[d|w|m]_[1..24]. The d-readings
+        in the readings energy_[heating|cooling]_[d|w|m]_[1..24]. The d-readings 
         refer to 2-hour time slices from yesterday [d_1..d_12] and today 
         [d_13..d_24]. The w-readings refer to whole days [Mon..Sun] of the last 
-        week [w_1..w_7] and current week [w_8..w_14]. The m-readings refer to whole
-        months [Jan..Dez] in the last year [m_1..m_12] and current year [m_13..m_24].
+        week [w_1..w_7] and current week [w_8..w_14]. The m-readings refer to whole 
+        months [Jan..Dez] in the last year [m_1..m_12] and current year [m_13..m_24]. 
       </li>
     </ul>
   </ul>
@@ -1438,7 +1469,7 @@ sub DaikinCloud_CallbackUpdateRequest
 <h3>DaikinCloud</h3>
 <ul>
   Dieses Modul kann Daikin-Klimaanlagen und Daikin-W&auml;rmepumpen steuern, 
-  welche mit der Daikin-Cloud (EU) verbunden sind. Die Ger&auml;te m&uuml;ssen
+  welche mit der Daikin-Cloud (EU) verbunden sind. Die Ger&auml;te m&uuml;ssen 
   zun&auml;chst &uuml;ber die Daikin <b>ONECTA-App</b> zur Cloud 
   hinzugef&uuml;gt werden. Sobald sie in der Cloud hinzugef&uuml;gt wurden, 
   k&ouml;nnen sie auch mit diesem Modul gesteuert und verwaltet werden.<br><br>
@@ -1461,16 +1492,16 @@ sub DaikinCloud_CallbackUpdateRequest
       zu verwenden.<br><br>
       Es besteht auch die M&ouml;glichkeit, eine individuelle REDIRECT_URI für 
       FHEM zu definieren. Diese muss nach folgendem Schema erstellt/definiert werden:
-	  <br><br>
+      <br><br>
       https://&lt;IP FHEM&gt;:8083/fhem?cmd.Test=set%20DaikinMaster%20AuthCode%20
-      <br><br> 
+      <br><br>
       Diese REDIRECT_URI muss den Host enthalten, den man selbst im Browser für den 
       Zugriff auf FHEM verwendet, also in der Regel die IP-Adresse des FHEM-Servers. 
       Damit soll &uuml;ber die WEB-API von FHEM der Authorisierungscode als Kommando 
       in das definierte Master-Device (hier z.B. DaikinMaster) &uuml;bergeben werden. 
-      So wie die REDIRECT_URI im Daikin Developer Portal definiert worden ist, muss
+      So wie die REDIRECT_URI im Daikin Developer Portal definiert worden ist, muss 
       sie auch in der Ger&auml;tedefinition in FHEM angegeben werden. Bei Benutzung 
-      des csrfToken in FHEM, muss ein statisches Token verwendet werden und dieses
+      des csrfToken in FHEM, muss ein statisches Token verwendet werden und dieses 
       an die REDIRECT_URI angehangen werden (&fwcsrf=myToken123). Auch hier gilt, 
       dass die REDIRECT_URI im Daikin Developer Portal zu 100% <b>identisch</b> sein 
       muss mit der Angabe in der Ger&auml;tedefinition in FHEM!
@@ -1480,7 +1511,7 @@ sub DaikinCloud_CallbackUpdateRequest
       verschiedene Fallstricke bereit h&auml;lt, kann ich jedem Einsteiger nur empfehlen 
       stattdessen https://my.home-assistant.io/redirect/oauth als REDIRECT_URI zu verwenden.
       <br><br>
-      Nachdem das Master-Device angelegt worden ist, ist ein Daikin-Cloud-Login (OAuth2)
+      Nachdem das Master-Device angelegt worden ist, ist ein Daikin-Cloud-Login (OAuth2) 
       erforderlich. Der individuelle Link ist in den Internals gespeichert 
       (Internal AUTHORIZATION_LINK). Ihr werdet auf die Seite von Daikin geleitet, 
       m&uuml;sst euch dort einloggen, den Nutzungsbedingungen zustimmen und die Freigabe 
@@ -1514,20 +1545,20 @@ sub DaikinCloud_CallbackUpdateRequest
       <a id="DaikinCloud-set-AuthCode"></a>
       <li><b>AuthCode</b><br>
         Der Daikin-Cloud-Login (OAuth2) gibt einen tempor&auml;ren 
-        Autorisierungscode zur&uuml;ck. Falls der automatische Prozess
-        scheitert, kann der Autorisierungscode (= R&uuml;ckgabe an die
+        Autorisierungscode zur&uuml;ck. Falls der automatische Prozess 
+        scheitert, kann der Autorisierungscode (= R&uuml;ckgabe an die 
         redirect-uri) auch manuell gesetzt werden.
       </li>
       <a id="DaikinCloud-set-Logout"></a>
       <li><b>Logout</b><br>
-        Um den Zugriff auf die Cloud zu beenden, kannst du dich ausloggen.
+        Um den Zugriff auf die Cloud zu beenden, kannst du dich ausloggen. 
         Der access-token und der refresh-token werden dabei zur&uuml;ckgegeben 
         und ung&uuml;ltig gesetzt.
       </li><br>
     </ul>
     Die folgenden Set-Befehle h&auml;ngen von den M&ouml;glichkeiten der 
     jeweiligen Innenger&auml;te ab. In der neuen API von Daikin werden 
-    nicht mehr alle Befehle unterst&uuml;tzt. Es werden daher immer nur die
+    nicht mehr alle Befehle unterst&uuml;tzt. Es werden daher immer nur die 
     m&ouml;glichen und zul&auml;ssigen Befehle angezeigt!<br>
     <br>
     <ul>
@@ -1536,9 +1567,9 @@ sub DaikinCloud_CallbackUpdateRequest
         W&auml;hlt den Steuermodus des Au&szlig;enger&auml;tes. Der Modus 
         fixed (manuell) kann gew&auml;hlt werden, um ein Takten des 
         Au&szlig;enger&auml;tes zu minimieren oder auch um Energie zu 
-        sparen. Wichtig: Die Option steht ggf. nur zur Verf&uuml;gung, wenn
+        sparen. Wichtig: Die Option steht ggf. nur zur Verf&uuml;gung, wenn 
         das Benutzerkonto bzw. die Zugangsdaten des Eigent&uuml;mers verwendet 
-        werden, und nicht das Benutzerkonto eines eingeladenen Zweitnutzers.
+        werden, und nicht das Benutzerkonto eines eingeladenen Zweitnutzers. 
       </li>
       <a id="DaikinCloud-set-demandValue"></a>
       <li><b>demandValue</b> [ 40 .. 100 ]<br>
@@ -1576,11 +1607,31 @@ sub DaikinCloud_CallbackUpdateRequest
       <li><b>onOffMode</b> [ on | off ]<br>
         Schaltet das Innenger&auml;t ein oder aus.
       </li>
+      <a id="DaikinCloud-set-on"></a>
+      <li><b>on</b><br>
+        Schaltet das Innenger&auml;t ein (Kurzform f&uuml;r: onOffMode on).
+      </li>
+      <a id="DaikinCloud-set-off"></a>
+      <li><b>off</b><br>
+        Schaltet das Innenger&auml;t aus (Kurzform f&uuml;r: onOffMode off).
+      </li>
+      <a id="DaikinCloud-set-on-for-timer"></a>
+      <li><b>on-for-timer</b> [ 1 .. &infin; ]<br>
+        Schaltet das Innenger&auml;t ein und nach der definierten Zeit 
+        (Zeitangabe in Sekunden) wieder aus. Weitere SetExtensions werden 
+        werden unterst&uuml;tzt (z.B. on-till, on-till-overnight, etc). 
+      </li>
+      <a id="DaikinCloud-set-off-for-timer"></a>
+      <li><b>off-for-timer</b> [ 1 .. &infin; ]<br>
+        Schaltet das Innenger&auml;t aus und nach der definierten Zeit 
+        (Zeitangabe in Sekunden) wieder ein. Weitere SetExtensions werden 
+        werden unterst&uuml;tzt (z.B. off-till, off-till-overnight, etc).
+      </li>	  
       <a id="DaikinCloud-set-operationMode"></a>
       <li><b>operationMode</b> [ fanOnly | heating | cooling | auto | dry ]<br>
-        W&auml;hlt den Betriebsmodus des Innenger&auml;tes. Wichtig: Ein
-        Multi-Split-Au&szlig;enger&auml;t kann unterschiedliche Betriebsmodi
-        verschiedener Innenger&auml;te nicht gleichzeitig unterst&uuml;tzen.
+        W&auml;hlt den Betriebsmodus des Innenger&auml;tes. Wichtig: Ein 
+        Multi-Split-Au&szlig;enger&auml;t kann unterschiedliche Betriebsmodi 
+        verschiedener Innenger&auml;te nicht gleichzeitig unterst&uuml;tzen. 
         D.h. das Multi-Split-Au&szlig;enger&auml;t kann gleichzeitig entweder 
         Innenger&auml;te mit W&auml;rme oder K&auml;lte versorgen.
       </li>
@@ -1595,13 +1646,13 @@ sub DaikinCloud_CallbackUpdateRequest
       <a id="DaikinCloud-set-setpoint"></a>
       <li><b>setpoint</b> [ 18 .. 30 ]<br>
         Setzt die Zieltemperatur des Innenger&auml;tes im erlaubten Bereich. 
-        Der erlaubte Bereich ist abh&auml;ngig vom Operation-Modus und von der
+        Der erlaubte Bereich ist abh&auml;ngig vom Operation-Modus und von der 
         Art des Innenger&auml;tes (Aufl&oumlsung 0.5 Grad).
       </li>
       <a id="DaikinCloud-set-offset"></a>
       <li><b>offset</b> [ -10 .. 10 ]<br>
         Setzt einen Offset-Wert zum Sollwert (z.B. Vorlauftemperatur), um 
-        diesen anzupassen (bei Altherma-Ger&auml;ten je nach Konfiguration
+        diesen anzupassen (bei Altherma-Ger&auml;ten je nach Konfiguration 
         verf&uuml;gbar). 
       </li>
       <a id="DaikinCloud-set-swing"></a>
@@ -1613,11 +1664,11 @@ sub DaikinCloud_CallbackUpdateRequest
       <li><b>fanSpeed</b> [ auto | quiet | Level1 | Level2 | Level3 | Level4 | Level5 ]<br>
         Nur verf&uuml;gbar, wenn das Innenger&auml;t sowohl fanMode als 
         fanLevel unterst&uuml;tzt.
-      </li>     
+      </li>
     </ul>
   </ul>
   <br>
-  <b>Get</b> 
+  <b>Get</b>
   <ul>
     <ul>
       <br>
@@ -1625,7 +1676,7 @@ sub DaikinCloud_CallbackUpdateRequest
       <li><b>refreshToken</b><br>
         Der Access-Token ist normalerweise 3600 Sekunden g&uuml;tig. Er kann 
         aber erneuert werden. Dies wird normalerweise automatisch vor Ablauf 
-        der G&uuml;tigkeitsdauer veranlasst. Mit diesem Befehl kann auch eine
+        der G&uuml;tigkeitsdauer veranlasst. Mit diesem Befehl kann auch eine 
         manuelle Erneuerung angesto&szlig;en werden.
       </li>
       <a id="DaikinCloud-get-forceUpdate"></a>
@@ -1637,7 +1688,7 @@ sub DaikinCloud_CallbackUpdateRequest
       <li><b>setlist</b><br>
         Zeigt die verf&uuml;gbaren Set-Befehle f&uuml;r das gew&auml;hlte 
         Innenger&auml;t und die erlaubten Optionen dazu an.
-      </li>     
+      </li>
     </ul>
   </ul>
   <br>
@@ -1657,8 +1708,8 @@ sub DaikinCloud_CallbackUpdateRequest
       <li><b>interval</b> [ 0 | 900 .. &infin; ]<br>
         Definiert das Intervall in Sekunden, innerhalb dessen die aktuellen 
         Daten aus der Cloud jeweils abgefragt werden sollen. Das Minimum 
-        betr&auml;gt 900 Sekunden, da ein aktuell ein Tageslimit mit maximal
-        200 Anfragen (inklusive Set-Befehle) pro Tag an die Cloud besteht.
+        betr&auml;gt 900 Sekunden, da ein aktuell ein Tageslimit mit maximal 
+        200 Anfragen (inklusive Set-Befehle) pro Tag an die Cloud besteht. 
         Standard sind 900 Sekunden. Wenn das Attribut auf 0 gesetzt wird, 
         wird der automatisierte Abruf deaktiviert. Dieses Attribut ist nur 
         im Master-Device verf&uuml;gbar.<br>
@@ -1673,18 +1724,18 @@ sub DaikinCloud_CallbackUpdateRequest
       <a id="DaikinCloud-attr-consumptionData"></a>
       <li><b>consumptionData</b> [ 0 | 1 ]<br>
         <i>Master-Device:</i> Wenn auf 1 gesetzt, werden die in der Cloud 
-        gespeicherten Verbrauchsdaten ausgelesen und als Summenwerte
+        gespeicherten Verbrauchsdaten ausgelesen und als Summenwerte 
         in den Readings kWh_[heating|cooling]_[day|week|year] gespeichert.
         <br><br>
         <i>Innenger&auml;t:</i> Wenn auf 1 gesetzt, werden zus&auml;tzlich 
-        die Rohdaten der energy-readings aus der Cloud f&uuml;r dieses Device   
-        gespeichert. Dies setzt voraus, dass im Master-Device das Attribut   
+        die Rohdaten der energy-readings aus der Cloud f&uuml;r dieses Device 
+        gespeichert. Dies setzt voraus, dass im Master-Device das Attribut 
         consumptionData auf 1 gesetzt worden ist. Die Rohdaten werden in 
         den Readings energy_[heating|cooling]_[d|w|m]_[1..24] gespeichert. 
         Die d-Readings beziehen sich auf 2-Stunden-Zeitscheiben von gestern 
-        [d_1..d_12] und heute [d_13..d_24]. Die w-Readings beziehen sich auf  
+        [d_1..d_12] und heute [d_13..d_24]. Die w-Readings beziehen sich auf 
         ganze Tage [Mo..So] der letzten Woche [w_1..w_7] und aktuellen Woche 
-        [w_8..w_14]. Die m-Readings beziehen sich auf ganze Monate [Jan..Dez]
+        [w_8..w_14]. Die m-Readings beziehen sich auf ganze Monate [Jan..Dez] 
         im letzten Jahr [m_1..m_12] und aktuellen Jahr [m_13..m_24].
       </li>
     </ul>
