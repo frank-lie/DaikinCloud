@@ -1,4 +1,4 @@
 DaikinCloud
 - Umstellung auf die neue OPEN-API
-- Update auf v2.1.15: support SetExtensions (on-for-timer, off-for-timer) an short commands (on, off)
+- Update auf v2.1.16: support shorter intervals (new Attribut allow-short-intervals)
 - ausführlicher Changelog im Modul (https://github.com/frank-lie/DaikinCloud/blob/main/FHEM/58_DaikinCloud.pm)
