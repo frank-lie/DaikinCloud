@@ -8,6 +8,7 @@
 # doesn't appear in the Daikin-ONECTA App, they will also not appear in this modul!
 #
 #######################################################################################################
+# v2.1.16- 06.01.2025 support shorter intervals (new Attribut allow-short-intervals)
 # v2.1.15- 12.11.2024 support SetExtensions (on-for-timer, off-for-timer) an short commands (on, off)
 # v2.1.14- 09.07.2024 fix: correct errortext for failed response
 # v2.1.13- 07.07.2024 fix: individuel redirect-url -> evaluate FW_webArgs for AuthCode
@@ -44,7 +45,7 @@ use vars qw(%FW_webArgs);
 my $json_xs_available = 1;
 eval "use JSON::XS qw(decode_json); 1" or $json_xs_available = 0;
 
-my $DaikinCloud_version = 'v2.1.15 - 12.11.2024';
+my $DaikinCloud_version = 'v2.1.16 - 06.01.2025';
 
 my $daikin_oidc_url = 	"https://idp.onecta.daikineurope.com/v1/oidc/";
 my $daikin_cloud_url =	"https://api.onecta.daikineurope.com/v1/gateway-devices";
@@ -171,15 +172,15 @@ sub DaikinCloud_Define($$)
 			CommandDeleteReading(undef,'-q $hash->{NAME} .refresh_token') if (defined(ReadingsVal($hash->{NAME},'.refresh_token',undef)));
 			CommandDeleteReading(undef,'-q $hash->{NAME} .access_token') if (defined(ReadingsVal($hash->{NAME},'.access_token',undef)));
 			setKeyValue('DaikinCloud_username',undef); 
-			setKeyValue('DaikinCloud_password',undef);			
+			setKeyValue('DaikinCloud_password',undef);
 		}
 		 
-		setDevAttrList($name, 'autocreate:1,0 interval consumptionData:1,0 saveRawData:1,0'. $readingFnAttributes);
+		setDevAttrList($name, 'autocreate:1,0 interval consumptionData:1,0 saveRawData:1,0 allow-short-intervals:1,0 '. $readingFnAttributes);
 		if ($init_done) {
 			CommandAttr(undef, '-silent '.$name.' autocreate 1') if(!AttrVal($name,"autocreate",""));
 			CommandAttr(undef, '-silent '.$name.' interval 900') if(!AttrVal($name,"interval",""));
 			CommandAttr(undef, '-silent '.$name.' consumptionData 1') if(!AttrVal($name,"consumptionData",""));
-			CommandAttr(undef, '-silent '.$name.' room DaikinCloud_Devices') if(!AttrVal($name,"room",""));				
+			CommandAttr(undef, '-silent '.$name.' room DaikinCloud_Devices') if(!AttrVal($name,"room",""));
 		}
 	}
 	return undef;
@@ -869,7 +870,7 @@ sub DaikinCloud_Attr($$)
 				$hash->{INTERVAL} = 0;
 				RemoveInternalTimer($hash,'DaikinCloud_UpdateRequest');
 				readingsSingleUpdate($hash, 'state', 'polling inactive', 1 );
-			} elsif ( $attrVal >= 900 ) {
+			} elsif ( AttrVal($name,'allow-short-intervals',0) || $attrVal >= 900 ) {
 				$hash->{INTERVAL} = $attrVal;
 				RemoveInternalTimer($hash,'DaikinCloud_UpdateRequest');
 				InternalTimer(gettimeofday()+1, 'DaikinCloud_UpdateRequest', $hash, 0);
@@ -1435,6 +1436,13 @@ sub DaikinCloud_CallbackUpdateRequest
         request limit of 200 requests a day (include set-commands). 
         Default is 900 seconds. If set to 0, the polling will be disabled. <br>
       </li>
+      <a id="DaikinCloud-attr-allow-short-intervals"></a>
+      <li><b>allow-short-intervals</b> [ 1 | 0 ]<br>
+        If the attribute is set to 1, a shorter interval than 900 seconds can be 
+        defined. This is only recommended if, for example, no or few set commands 
+        are sent or the queries are to be concentrated on a specific period of time 
+        each day.<br>
+      </li>
     </ul>
   </ul>
   <br>
@@ -1708,11 +1716,19 @@ sub DaikinCloud_CallbackUpdateRequest
       <li><b>interval</b> [ 0 | 900 .. &infin; ]<br>
         Definiert das Intervall in Sekunden, innerhalb dessen die aktuellen 
         Daten aus der Cloud jeweils abgefragt werden sollen. Das Minimum 
-        betr&auml;gt 900 Sekunden, da ein aktuell ein Tageslimit mit maximal 
+        betr&auml;gt 900 Sekunden, da aktuell ein Tageslimit mit maximal 
         200 Anfragen (inklusive Set-Befehle) pro Tag an die Cloud besteht. 
         Standard sind 900 Sekunden. Wenn das Attribut auf 0 gesetzt wird, 
         wird der automatisierte Abruf deaktiviert. Dieses Attribut ist nur 
         im Master-Device verf&uuml;gbar.<br>
+      </li>
+      <a id="DaikinCloud-attr-allow-short-intervals"></a>
+      <li><b>allow-short-intervals</b> [ 1 | 0 ]<br>
+        Wenn das Attribut auf 1 gesetzt ist, kann auch ein k&uuml;rzeres 
+        Intervall als 900 Sekunden definiert werden. Dies ist nur dann zu 
+        empfehlen, wenn z.B. keine oder wenig set-Befehle gesendet werden 
+        oder die Abfragen auf jeweils einen bestimmten Zeitraum am Tag 
+        konzentriert werden sollen.<br>
       </li>
     </ul>
   </ul>
